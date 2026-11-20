@@ -654,6 +654,7 @@ class VodResource extends Resource implements CopilotResource
                                         TextInput::make('search_query')
                                             ->label(__('Search Query'))
                                             ->placeholder(__('Enter movie name...'))
+                                            ->helperText(__('Search by title, or enter a TMDB ID or themoviedb.org link.'))
                                             ->required()
                                             ->columnSpan(2),
                                         TextInput::make('search_year')

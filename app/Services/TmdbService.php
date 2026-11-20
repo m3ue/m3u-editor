@@ -1950,6 +1950,12 @@ class TmdbService
             return [];
         }
 
+        [$idMatch, $idOnly] = $this->resolveManualIdQuery($query, 'tv', $language);
+        $fallback = $idMatch ? [$idMatch] : [];
+        if ($idOnly) {
+            return $fallback;
+        }
+
         $this->waitForRateLimit();
 
         try {
@@ -1985,32 +1991,22 @@ class TmdbService
                     'status' => $response->status(),
                 ]);
 
-                return [];
+                return $fallback;
             }
 
-            $results = $response->json('results', []);
+            $results = collect($response->json('results', []))
+                ->take(10)
+                ->map(fn (array $result): array => $this->mapManualTvResult($result))
+                ->all();
 
-            // Transform results for UI display
-            return collect($results)->take(10)->map(function ($result) {
-                return [
-                    'id' => $result['id'],
-                    'name' => $result['name'] ?? $result['original_name'] ?? 'Unknown',
-                    'original_name' => $result['original_name'] ?? null,
-                    'first_air_date' => $result['first_air_date'] ?? null,
-                    'year' => isset($result['first_air_date']) ? substr($result['first_air_date'], 0, 4) : null,
-                    'overview' => Str::limit($result['overview'] ?? '', 200),
-                    'poster_path' => $result['poster_path'] ?? null,
-                    'vote_average' => $result['vote_average'] ?? null,
-                    'origin_country' => implode(', ', $result['origin_country'] ?? []),
-                ];
-            })->toArray();
+            return $this->prependManualIdMatch($idMatch, $results);
         } catch (\Exception $e) {
             Log::error('TMDB manual TV search exception', [
                 'query' => $query,
                 'error' => $e->getMessage(),
             ]);
 
-            return [];
+            return $fallback;
         }
     }
 
@@ -2028,6 +2024,12 @@ class TmdbService
             Log::warning('TMDB API key not configured');
 
             return [];
+        }
+
+        [$idMatch, $idOnly] = $this->resolveManualIdQuery($query, 'movie', $language);
+        $fallback = $idMatch ? [$idMatch] : [];
+        if ($idOnly) {
+            return $fallback;
         }
 
         $this->waitForRateLimit();
@@ -2065,34 +2067,154 @@ class TmdbService
                     'status' => $response->status(),
                 ]);
 
-                return [];
+                return $fallback;
             }
 
-            $results = $response->json('results', []);
+            $results = collect($response->json('results', []))
+                ->take(10)
+                ->map(fn (array $result): array => $this->mapManualMovieResult($result))
+                ->all();
 
-            // Transform results for UI display
-            return collect($results)->take(10)->map(function ($result) {
-                return [
-                    'id' => $result['id'],
-                    'title' => $result['title'] ?? $result['original_title'] ?? 'Unknown',
-                    'name' => $result['title'] ?? $result['original_title'] ?? 'Unknown',
-                    'original_title' => $result['original_title'] ?? null,
-                    'original_name' => $result['original_title'] ?? null,
-                    'release_date' => $result['release_date'] ?? null,
-                    'year' => isset($result['release_date']) ? substr($result['release_date'], 0, 4) : null,
-                    'overview' => Str::limit($result['overview'] ?? '', 200),
-                    'poster_path' => $result['poster_path'] ?? null,
-                    'vote_average' => $result['vote_average'] ?? null,
-                ];
-            })->toArray();
+            return $this->prependManualIdMatch($idMatch, $results);
         } catch (\Exception $e) {
             Log::error('TMDB manual movie search exception', [
                 'query' => $query,
                 'error' => $e->getMessage(),
             ]);
 
-            return [];
+            return $fallback;
         }
+    }
+
+    /**
+     * Resolve a manual search query that names a TMDB ID directly.
+     *
+     * A bare number ("603") is looked up by ID and still title-searched, since
+     * plenty of titles are numeric ("1917", "24"). An explicit "tmdb:603" or a
+     * themoviedb.org link is an ID lookup only. A link for the other media type
+     * (a /tv/ link in a movie search) resolves to no match, as TMDB movie and TV
+     * IDs are separate namespaces.
+     *
+     * @param  'tv'|'movie'  $type
+     * @return array{0: array<string, mixed>|null, 1: bool} [ID match, whether to skip the title search]
+     */
+    protected function resolveManualIdQuery(string $query, string $type, ?string $language = null): array
+    {
+        $query = trim($query);
+
+        if (preg_match('~themoviedb\.org/(?:[a-z]{2}(?:-[A-Z]{2})?/)?(movie|tv)/(\d+)~i', $query, $matches)) {
+            $idMatch = strtolower($matches[1]) === $type
+                ? $this->findManualResultById($type, (int) $matches[2], $language)
+                : null;
+
+            return [$idMatch, true];
+        }
+
+        if (preg_match('/^tmdb\s*[:#-]?\s*(\d+)$/i', $query, $matches)) {
+            return [$this->findManualResultById($type, (int) $matches[1], $language), true];
+        }
+
+        if (preg_match('/^\d+$/', $query)) {
+            return [$this->findManualResultById($type, (int) $query, $language), false];
+        }
+
+        return [null, false];
+    }
+
+    /**
+     * Fetch a single TMDB title by ID, shaped like a manual search result.
+     *
+     * @param  'tv'|'movie'  $type
+     * @return array<string, mixed>|null
+     */
+    protected function findManualResultById(string $type, int $tmdbId, ?string $language = null): ?array
+    {
+        if ($tmdbId <= 0) {
+            return null;
+        }
+
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(self::BASE_URL."/{$type}/{$tmdbId}", [
+                'api_key' => $this->apiKey,
+                'language' => $language ?? $this->language,
+            ]);
+
+            if (! $response->successful() || ! $response->json('id')) {
+                return null;
+            }
+
+            // The details endpoints return the same fields the mappers read from search results
+            return $type === 'tv'
+                ? $this->mapManualTvResult($response->json())
+                : $this->mapManualMovieResult($response->json());
+        } catch (\Exception $e) {
+            Log::error('TMDB manual ID lookup exception', [
+                'type' => $type,
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Put the ID match first and drop it from the title results if repeated.
+     *
+     * @param  array<string, mixed>|null  $idMatch
+     * @param  array<int, array<string, mixed>>  $results
+     * @return array<int, array<string, mixed>>
+     */
+    protected function prependManualIdMatch(?array $idMatch, array $results): array
+    {
+        if (! $idMatch) {
+            return $results;
+        }
+
+        $others = array_filter($results, fn (array $result): bool => (int) $result['id'] !== (int) $idMatch['id']);
+
+        return [$idMatch, ...array_values($others)];
+    }
+
+    /**
+     * @param  array<string, mixed>  $result  A TMDB TV search result or details payload
+     * @return array<string, mixed>
+     */
+    protected function mapManualTvResult(array $result): array
+    {
+        return [
+            'id' => $result['id'],
+            'name' => $result['name'] ?? $result['original_name'] ?? 'Unknown',
+            'original_name' => $result['original_name'] ?? null,
+            'first_air_date' => $result['first_air_date'] ?? null,
+            'year' => ! empty($result['first_air_date']) ? substr($result['first_air_date'], 0, 4) : null,
+            'overview' => Str::limit($result['overview'] ?? '', 200),
+            'poster_path' => $result['poster_path'] ?? null,
+            'vote_average' => $result['vote_average'] ?? null,
+            'origin_country' => implode(', ', $result['origin_country'] ?? []),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $result  A TMDB movie search result or details payload
+     * @return array<string, mixed>
+     */
+    protected function mapManualMovieResult(array $result): array
+    {
+        return [
+            'id' => $result['id'],
+            'title' => $result['title'] ?? $result['original_title'] ?? 'Unknown',
+            'name' => $result['title'] ?? $result['original_title'] ?? 'Unknown',
+            'original_title' => $result['original_title'] ?? null,
+            'original_name' => $result['original_title'] ?? null,
+            'release_date' => $result['release_date'] ?? null,
+            'year' => ! empty($result['release_date']) ? substr($result['release_date'], 0, 4) : null,
+            'overview' => Str::limit($result['overview'] ?? '', 200),
+            'poster_path' => $result['poster_path'] ?? null,
+            'vote_average' => $result['vote_average'] ?? null,
+        ];
     }
 
     /**

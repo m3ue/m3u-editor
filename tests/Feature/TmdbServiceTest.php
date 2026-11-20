@@ -1251,3 +1251,76 @@ it('skips straight to the TV endpoint when the media type is already known', fun
     Http::assertNotSent(fn ($request) => str_contains($request->url(), '/movie/334430'));
     expect($details['media_type'])->toBe('tv');
 });
+
+// ---------------------------------------------------------------------------
+// Manual search by TMDB ID (#1646)
+// ---------------------------------------------------------------------------
+
+it('looks up a bare numeric query by ID and still title-searches it', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/1917*' => Http::response([
+            'id' => 1917, 'title' => 'Some Other Film', 'release_date' => '1985-03-01',
+        ], 200),
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => [
+            ['id' => 530915, 'title' => '1917', 'release_date' => '2019-12-25'],
+            ['id' => 1917, 'title' => 'Some Other Film', 'release_date' => '1985-03-01'],
+        ]], 200),
+    ]);
+
+    $results = (new TmdbService($this->settings))->searchMovieManual('1917');
+
+    expect(array_column($results, 'id'))->toBe([1917, 530915])
+        ->and($results[0]['year'])->toBe('1985');
+});
+
+it('only looks up the ID for an explicit tmdb: prefix', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/1399*' => Http::response([
+            'id' => 1399, 'name' => 'Game of Thrones', 'first_air_date' => '2011-04-17', 'origin_country' => ['US'],
+        ], 200),
+    ]);
+
+    $results = (new TmdbService($this->settings))->searchTvSeriesManual('tmdb:1399');
+
+    expect($results)->toHaveCount(1)
+        ->and($results[0]['id'])->toBe(1399)
+        ->and($results[0]['name'])->toBe('Game of Thrones')
+        ->and($results[0]['origin_country'])->toBe('US');
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/search/'));
+});
+
+it('resolves a pasted themoviedb.org link of the matching type', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/603*' => Http::response(['id' => 603, 'title' => 'The Matrix'], 200),
+    ]);
+
+    $results = (new TmdbService($this->settings))
+        ->searchMovieManual('https://www.themoviedb.org/movie/603-the-matrix?language=en-US');
+
+    expect(array_column($results, 'id'))->toBe([603]);
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/search/'));
+});
+
+it('returns nothing for a themoviedb.org link of the other media type', function () {
+    Http::fake();
+
+    $results = (new TmdbService($this->settings))
+        ->searchMovieManual('https://www.themoviedb.org/tv/1399-game-of-thrones');
+
+    expect($results)->toBe([]);
+    Http::assertNothingSent();
+});
+
+it('falls back to title results when a numeric ID does not exist', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/24*' => Http::response(['status_code' => 34], 404),
+        'https://api.themoviedb.org/3/search/tv*' => Http::response(['results' => [
+            ['id' => 1973, 'name' => '24', 'first_air_date' => '2001-11-06'],
+        ]], 200),
+    ]);
+
+    $results = (new TmdbService($this->settings))->searchTvSeriesManual('24');
+
+    expect(array_column($results, 'id'))->toBe([1973]);
+});
