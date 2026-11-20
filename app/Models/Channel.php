@@ -380,22 +380,17 @@ class Channel extends Model
     }
 
     /**
-     * The archive window in hours: this channel's own, or else its linked
-     * catchup channel's.
+     * The archive window in hours. With a usable linked catchup channel, catchup is
+     * always served from it, so its window wins (falling back to this channel's own
+     * only when the linked one has none recorded); otherwise this channel's own.
      */
     public function catchupShiftHours(): int
     {
-        if ($this->shift) {
-            return (int) $this->shift;
-        }
+        $linkedShift = array_key_exists('linked_catchup', $this->attributes)
+            ? (! empty($this->attributes['linked_catchup']) ? (int) ($this->attributes['linked_catchup_shift'] ?? 0) : 0)
+            : (int) ($this->linkedCatchupChannel()?->shift ?? 0);
 
-        if (array_key_exists('linked_catchup', $this->attributes)) {
-            return ! empty($this->attributes['linked_catchup'])
-                ? (int) ($this->attributes['linked_catchup_shift'] ?? 0)
-                : 0;
-        }
-
-        return (int) ($this->linkedCatchupChannel()?->shift ?? 0);
+        return $linkedShift ?: (int) ($this->shift ?? 0);
     }
 
     public function failoverChannels(): HasManyThrough

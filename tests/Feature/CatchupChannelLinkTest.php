@@ -6,6 +6,7 @@
  * the linked channel.
  */
 
+use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\Channels\Pages\ListChannels;
 use App\Filament\Resources\Channels\Pages\ViewChannel;
 use App\Models\Channel;
@@ -202,7 +203,16 @@ it('points the m3u catchup-source at our endpoint even with raw provider urls', 
         ->not->toContain('//hd.provider');
 });
 
-it('keeps the channel own archive window over the linked one', function () {
+it('advertises the linked archive window over the channel own, since the link serves catchup', function () {
+    $this->fhdChannel->update(['catchup_channel_id' => $this->hdChannel->id, 'shift' => 240]);
+
+    $content = $this->get(catchupLinkM3uUrl($this))->streamedContent();
+
+    expect($content)->toContain('catchup-days="3" timeshift="3"');
+});
+
+it('falls back to the channel own archive window when the linked one has none', function () {
+    $this->hdChannel->update(['shift' => 0]);
     $this->fhdChannel->update(['catchup_channel_id' => $this->hdChannel->id, 'shift' => 24]);
 
     $content = $this->get(catchupLinkM3uUrl($this))->streamedContent();
@@ -271,6 +281,55 @@ it('rejects linking a channel without catchup from the edit form', function () {
         ->assertHasFormErrors(['catchup_channel_id']);
 
     expect($this->fhdChannel->fresh()->catchup_channel_id)->toBeNull();
+});
+
+it('does not block saving other fields when an existing link has become unusable', function () {
+    catchupLinkEditableChannel($this);
+    $this->fhdChannel->update(['catchup_channel_id' => $this->hdChannel->id]);
+    $this->hdChannel->update(['catchup' => null]);
+
+    Livewire::test(ListChannels::class)
+        ->callAction(TestAction::make('edit')->table($this->fhdChannel), [
+            'title_custom' => 'Renamed',
+        ])
+        ->assertHasNoFormErrors();
+
+    expect($this->fhdChannel->fresh())
+        ->title_custom->toBe('Renamed')
+        ->catchup_channel_id->toBe($this->hdChannel->id);
+});
+
+it('accepts a channel that has its own link, since links are not chained', function () {
+    catchupLinkEditableChannel($this);
+    $third = Channel::factory()->for($this->otherPlaylist)->create([
+        'user_id' => $this->user->id,
+        'catchup' => '1',
+    ]);
+    $this->hdChannel->update(['catchup_channel_id' => $third->id]);
+
+    Livewire::test(ListChannels::class)
+        ->callAction(TestAction::make('edit')->table($this->fhdChannel), [
+            'catchup_channel_id' => $this->hdChannel->id,
+        ])
+        ->assertHasNoFormErrors();
+
+    expect($this->fhdChannel->fresh()->linkedCatchupChannel()?->id)->toBe($this->hdChannel->id);
+});
+
+it('does not label another user channel in the catchup channel field', function () {
+    $foreign = Channel::factory()->create([
+        'user_id' => User::factory()->create()->id,
+        'title' => 'Someone Elses Channel',
+        'catchup' => '1',
+    ]);
+    $this->actingAs($this->user);
+
+    expect(ChannelResource::catchupChannelOptionLabel($foreign->id, $this->fhdChannel))->toBeNull()
+        ->and(ChannelResource::catchupChannelOptionLabel($this->hdChannel->id, $this->fhdChannel))->toBe('News HD [HD Provider]');
+
+    // A link that has since become unusable still shows its label
+    $this->hdChannel->update(['catchup' => null]);
+    expect(ChannelResource::catchupChannelOptionLabel($this->hdChannel->id, $this->fhdChannel))->toBe('News HD [HD Provider]');
 });
 
 it('shows catchup as supported on the channel info view when linked', function () {

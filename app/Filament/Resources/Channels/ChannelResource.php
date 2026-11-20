@@ -1941,9 +1941,15 @@ class ChannelResource extends Resource implements CopilotResource
                         ->nullable()
                         ->columnSpan(2)
                         ->getSearchResultsUsing(fn (string $search, ?Channel $record): array => self::catchupChannelOptions($search, $record))
-                        ->getOptionLabelUsing(fn ($value): ?string => self::catchupChannelLabel(Channel::with(['playlist', 'customPlaylist'])->find($value)))
+                        ->getOptionLabelUsing(fn ($value, ?Channel $record): ?string => self::catchupChannelOptionLabel($value, $record))
                         ->rule(fn (?Channel $record) => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
-                            if ($value && ! self::catchupChannelCandidates($record)->whereKey($value)->exists()) {
+                            // An unchanged link isn't re-checked, so a linked channel that later loses
+                            // catchup doesn't block saving unrelated fields (playback ignores it anyway)
+                            if (! $value || (int) $value === $record?->catchup_channel_id) {
+                                return;
+                            }
+
+                            if (! self::catchupChannelCandidates($record)->whereKey($value)->exists()) {
                                 $fail(__('Choose one of your live channels that supports catchup.'));
                             }
                         }),
@@ -2177,8 +2183,9 @@ class ChannelResource extends Resource implements CopilotResource
 
     /**
      * Channels the given channel may borrow catchup from (#1661): the user's own live
-     * channels with catchup, other than itself. Channels that borrow catchup themselves
-     * are left out, since links aren't chained.
+     * channels with catchup of their own, other than itself. Matches
+     * Channel::linkedCatchupChannel(): a candidate's own link is irrelevant, since
+     * links aren't followed further.
      */
     private static function catchupChannelCandidates(?Channel $record): Builder
     {
@@ -2187,7 +2194,6 @@ class ChannelResource extends Resource implements CopilotResource
             ->where('channels.is_vod', false)
             ->whereNotNull('channels.catchup')
             ->whereNotIn('channels.catchup', ['', '0'])
-            ->whereNull('channels.catchup_channel_id')
             ->when($record?->id, fn (Builder $query, int $id) => $query->whereKeyNot($id));
     }
 
@@ -2212,6 +2218,24 @@ class ChannelResource extends Resource implements CopilotResource
             ->get()
             ->mapWithKeys(fn (Channel $channel): array => [$channel->id => self::catchupChannelLabel($channel)])
             ->all();
+    }
+
+    /**
+     * Label for the Catchup Channel field's current value. Scoped to the owner only (not
+     * the candidate filter), so a link that has since become unusable still shows its
+     * label rather than a blank field, while another user's channel never resolves.
+     */
+    public static function catchupChannelOptionLabel(mixed $value, ?Channel $record): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        return self::catchupChannelLabel(
+            Channel::with(['playlist', 'customPlaylist'])
+                ->where('user_id', $record?->user_id ?? auth()->id())
+                ->find($value)
+        );
     }
 
     private static function catchupChannelLabel(?Channel $channel): ?string
