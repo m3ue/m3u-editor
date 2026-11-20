@@ -41,6 +41,7 @@ use App\Services\AlertService;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
+use App\Services\ManagedCacheCapacitySnapshotSource;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkChannelSyncService;
 use App\Services\OptionalQueueSupervisors;
@@ -48,6 +49,7 @@ use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Services\SortService;
 use App\Services\TagRenamePropagationService;
+use App\Services\XtreamManagedCacheCapacitySnapshotSource;
 use App\Settings\GeneralSettings;
 use App\Support\ApiDocs\DocumentDvrAuthenticationErrors;
 use App\Support\ApiDocs\DocumentXtreamApiResponses;
@@ -115,6 +117,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(AiManager::class, fn ($app) => new PatchedAiManager($app));
 
         $this->app->singleton(GitInfoService::class);
+        $this->app->bind(ManagedCacheCapacitySnapshotSource::class, XtreamManagedCacheCapacitySnapshotSource::class);
 
         // Replaces Filament's registry (bound by FilamentServiceProvider, which registers
         // before app providers) so Horizon, Reverb and the scheduler build panels on first

@@ -8,6 +8,8 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use App\Services\EmbyPublicationCatalogService;
+use App\Services\ManagedCacheControlService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -59,6 +61,10 @@ function embyPublishingActionUrl(string $action, array $parameters = []): string
 }
 
 it('advertises the versioned managed library publishing contract to authenticated clients', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
+    app(GeneralSettings::class)->enable_cache = true;
     $response = $this->getJson(embyPublishingActionUrl('get_server_info'));
 
     $response->assertOk()
@@ -66,6 +72,17 @@ it('advertises the versioned managed library publishing contract to authenticate
         ->assertJsonPath('m3u_editor.library_publishing.actions.register_publisher', 'm3u_editor_register_publisher')
         ->assertJsonPath('m3u_editor.library_publishing.actions.catalog', 'm3u_editor_catalog')
         ->assertJsonPath('m3u_editor.library_publishing.actions.sync_result', 'm3u_editor_sync_result')
+        ->assertJsonPath('m3u_editor.library_publishing.cache_control', [
+            'api_version' => 1,
+            'actions' => [
+                'prefetch' => 'm3u_editor_cache_prefetch',
+                'playback' => 'm3u_editor_cache_playback',
+                'release' => 'm3u_editor_cache_release',
+            ],
+            'max_targets' => 100,
+            'heartbeat_seconds' => 30,
+            'lease_seconds' => 120,
+        ])
         ->assertJsonPath('m3u_editor.library_publishing.snapshot_mode', 'full')
         ->assertJsonPath('m3u_editor.library_publishing.features', [
             'library_mappings',
@@ -78,6 +95,115 @@ it('advertises the versioned managed library publishing contract to authenticate
     expect(json_encode($response->json('m3u_editor.library_publishing')))
         ->not->toContain('must-not-leak')
         ->not->toContain('/srv/emby');
+});
+
+it('does not advertise cache control while leaving library publishing available with caching disabled', function () {
+    app(GeneralSettings::class)->enable_cache = false;
+    $this->getJson(embyPublishingActionUrl('get_server_info'))
+        ->assertOk()
+        ->assertJsonPath('m3u_editor.library_publishing.api_version', 1)
+        ->assertJsonPath('m3u_editor.library_publishing.actions.catalog', 'm3u_editor_catalog')
+        ->assertJsonMissingPath('m3u_editor.library_publishing.cache_control');
+});
+
+it('requires POST and refuses cache actions while global caching is disabled', function () {
+    $payload = [
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'action' => 'm3u_editor_cache_prefetch',
+        'api_version' => 1,
+    ];
+
+    $this->getJson('/player_api.php?'.http_build_query($payload))
+        ->assertMethodNotAllowed();
+
+    $this->postJson('/player_api.php', $payload)
+        ->assertForbidden()
+        ->assertJsonPath('error.code', 'cache_disabled');
+});
+
+it('rejects a cache action for a mapping outside the authenticated owner catalog', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
+    $settings = app(GeneralSettings::class);
+    $settings->enable_cache = true;
+
+    $otherUser = User::factory()->create(['permissions' => ['use_integrations']]);
+    $foreignIntegration = MediaServerIntegration::factory()->for($otherUser)->createQuietly(['type' => 'emby']);
+    $foreignMapping = EmbyLibraryMapping::factory()
+        ->for($otherUser)
+        ->for($foreignIntegration, 'integration')
+        ->create([
+            'last_planned_revision' => str_repeat('a', 64),
+            'last_applied_revision' => str_repeat('a', 64),
+        ]);
+
+    $this->postJson('/player_api.php', [
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'action' => 'm3u_editor_cache_prefetch',
+        'api_version' => 1,
+        'integration_id' => $foreignIntegration->id,
+        'mapping_uuid' => $foreignMapping->uuid,
+        'revision' => str_repeat('a', 64),
+    ])->assertNotFound()
+        ->assertJsonPath('error.code', 'mapping_not_found');
+});
+
+it('resolves only an active managed mapping owned by the requesting user at its applied revision', function () {
+    $this->mapping->update([
+        'is_managed' => true,
+        'last_planned_revision' => str_repeat('a', 64),
+        'last_applied_revision' => str_repeat('a', 64),
+    ]);
+
+    $service = app(ManagedCacheControlService::class);
+
+    $activeMapping = $service->resolveActiveMapping(
+        $this->user,
+        $this->integration->id,
+        $this->mapping->uuid,
+        str_repeat('a', 64),
+    );
+
+    expect($activeMapping)->not->toBeNull()
+        ->and($activeMapping->id)->toBe($this->mapping->id);
+
+    $this->mapping->update(['is_managed' => false]);
+    expect($service->resolveActiveMapping($this->user, $this->integration->id, $this->mapping->uuid, str_repeat('a', 64)))->toBeNull();
+
+    $this->mapping->update(['is_managed' => true, 'enabled' => false]);
+    expect($service->resolveActiveMapping($this->user, $this->integration->id, $this->mapping->uuid, str_repeat('a', 64)))->toBeNull();
+
+    $this->mapping->update(['enabled' => true, 'last_applied_revision' => str_repeat('b', 64)]);
+    expect($service->resolveActiveMapping($this->user, $this->integration->id, $this->mapping->uuid, str_repeat('a', 64)))->toBeNull();
+});
+
+it('resolves cache targets only from the validated mapping catalog', function () {
+    $sourcePlaylist = Playlist::factory()->for($this->user)->createQuietly();
+    $group = Group::factory()->for($this->user)->for($sourcePlaylist)->create(['type' => 'vod']);
+    Channel::factory()->for($this->user)->for($sourcePlaylist)->for($group)->createQuietly([
+        'enabled' => true,
+        'is_vod' => true,
+        'container_extension' => 'mkv',
+    ]);
+
+    $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($this->mapping);
+    $item = $catalog['items'][0];
+    $variantKey = $item['variants'][0]['key'];
+
+    $target = app(ManagedCacheControlService::class)->resolveCatalogTarget(
+        $this->mapping,
+        $item['canonical_id'],
+        $variantKey,
+    );
+
+    expect($target)->not->toBeNull()
+        ->and($target['canonical_id'])->toBe($item['canonical_id'])
+        ->and($target['variant_key'])->toBe($variantKey)
+        ->and(app(ManagedCacheControlService::class)->resolveCatalogTarget($this->mapping, 'source:arbitrary', $variantKey))->toBeNull()
+        ->and(app(ManagedCacheControlService::class)->resolveCatalogTarget($this->mapping, $item['canonical_id'], 'unknown'))->toBeNull();
 });
 
 it('advertises publisher registration before the first mapping exists', function () {

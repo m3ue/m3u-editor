@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\DvrRetentionCleanup;
+use App\Jobs\ReleaseWatchedManagedCache;
 use App\Jobs\SweepArrCacheFailback;
 use App\Models\Plugin;
 use App\Services\OptionalQueueSupervisors;
@@ -100,6 +101,11 @@ if (config('cached_content.enabled', true)) {
         ->everyTenMinutes()
         ->withoutOverlapping();
 }
+
+// Release watched managed publishing cache files after their grace period.
+Schedule::job(new ReleaseWatchedManagedCache)
+    ->everyMinute()
+    ->withoutOverlapping();
 
 // Prune old notifications
 Schedule::command('app:prune-old-notifications --days=7')

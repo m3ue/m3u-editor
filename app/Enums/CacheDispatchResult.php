@@ -14,4 +14,7 @@ enum CacheDispatchResult: string
     case Disabled = 'disabled';
     case SentToArr = 'sent_to_arr';
     case InArrLibrary = 'in_arr_library';
+
+    case Deferred = 'deferred';
+    case Protected = 'protected';
 }

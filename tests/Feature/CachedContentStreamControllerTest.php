@@ -1,7 +1,11 @@
 <?php
 
+use App\Enums\CachedContentManagedBy;
+use App\Models\CachedContentActivityLease;
 use App\Models\CachedContentFile;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,9 +19,45 @@ beforeEach(function () {
     // Bus::fake() catches it; nothing reaches Redis during tests.
     Bus::fake();
     Storage::fake('cache');
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     $settings = Mockery::mock(GeneralSettings::class);
     $settings->enable_cache = true;
     app()->instance(GeneralSettings::class, $settings);
+});
+
+it('returns 404 without a reader lease when a managed file has no owner integration', function (): void {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    Storage::disk('cache')->put('cache/missing-integration.mp4', 'synthetic bytes');
+    $file = CachedContentFile::factory()->completed()->create([
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'file_path' => 'cache/missing-integration.mp4',
+        'managed_by' => CachedContentManagedBy::ManagedPublishing,
+    ]);
+    $this->get("/cached-content/{$user->name}/{$playlist->uuid}/{$file->uuid}.mp4")->assertNotFound();
+    expect(CachedContentActivityLease::count())->toBe(0);
+});
+
+it('does not serve managed bytes after caching is disabled behind a resolved settings instance', function (): void {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = false;
+    $persisted->save();
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    MediaServerIntegration::factory()->for($user)->createQuietly();
+    Storage::disk('cache')->put('cache/disabled-managed.mp4', 'synthetic bytes');
+    $file = CachedContentFile::factory()->completed()->create([
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'file_path' => 'cache/disabled-managed.mp4',
+        'managed_by' => CachedContentManagedBy::ManagedPublishing,
+    ]);
+    $this->get("/cached-content/{$user->name}/{$playlist->uuid}/{$file->uuid}.mp4")->assertNotFound();
+    expect(CachedContentActivityLease::count())->toBe(0);
+    Storage::disk('cache')->assertExists($file->file_path);
 });
 
 it('returns 401 with invalid credentials', function () {
@@ -497,3 +537,72 @@ it('returns 404 when another user tries to stream a file via their own credentia
 // DvrRecordingDownloadTest coverage; our controller mirrors that pattern
 // verbatim, so the shape coverage from Method 2 tests is sufficient for
 // Phase 1 scope.
+
+it('acquires a reader lease before opening a managed publishing file', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    Storage::disk('cache')->put('managed/movie.mp4', 'video-bytes');
+
+    $file = CachedContentFile::factory()->completed()->create([
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'content_type' => 'movie',
+        'tmdb_id' => '990',
+        'file_path' => 'managed/movie.mp4',
+        'managed_by' => CachedContentManagedBy::ManagedPublishing,
+        'source' => 'provider',
+    ]);
+
+    $response = $this->get("/cached-content/{$user->name}/{$playlist->uuid}/{$file->uuid}.mp4");
+
+    $response->assertOk();
+    expect(CachedContentActivityLease::query()
+        ->where('cached_content_file_id', $file->id)
+        ->where('kind', 'reader')
+        ->where('expires_at', '>', now())
+        ->exists())->toBeTrue();
+});
+
+it('does not create a reader lease for a non-managed cached file', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    Storage::disk('cache')->put('manual/movie.mp4', 'video-bytes');
+
+    $file = CachedContentFile::factory()->completed()->create([
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'content_type' => 'movie',
+        'tmdb_id' => '991',
+        'file_path' => 'manual/movie.mp4',
+        'managed_by' => null,
+    ]);
+
+    $this->get("/cached-content/{$user->name}/{$playlist->uuid}/{$file->uuid}.mp4")->assertOk();
+
+    expect(CachedContentActivityLease::count())->toBe(0);
+});
+
+it('releases the reader lease when the managed file is missing on disk', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+
+    $file = CachedContentFile::factory()->completed()->create([
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'content_type' => 'movie',
+        'tmdb_id' => '992',
+        'file_path' => 'managed/missing.mp4',
+        'managed_by' => CachedContentManagedBy::ManagedPublishing,
+        'source' => 'provider',
+    ]);
+
+    $this->get("/cached-content/{$user->name}/{$playlist->uuid}/{$file->uuid}.mp4")->assertNotFound();
+
+    expect(CachedContentActivityLease::query()
+        ->where('cached_content_file_id', $file->id)
+        ->where('kind', 'reader')
+        ->where('expires_at', '>', now())
+        ->exists())->toBeFalse();
+});

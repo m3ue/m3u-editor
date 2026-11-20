@@ -9,4 +9,6 @@ namespace App\Enums;
 enum CachedContentManagedBy: string
 {
     case DynamicGroup = 'dynamic_group';
+
+    case ManagedPublishing = 'managed_publishing';
 }
