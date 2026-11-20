@@ -115,6 +115,35 @@ table {
                 background-color: color-mix(in oklab, var(--gray-500) 16%, transparent);
             }
         }
+
+        /* Disabled: the same soft tint, faded, so it never outweighs the enabled ones */
+        & .fi-btn:not(.fi-outlined):not(label):is(.fi-disabled, [disabled]):not(.fi-force-enabled) {
+            background-image: none;
+            box-shadow: none;
+            opacity: 0.45;
+
+            &.fi-color {
+                background-color: color-mix(in oklab, var(--color-500) 8%, transparent);
+                color: var(--color-700);
+
+                & > .fi-icon {
+                    color: var(--color-600);
+                }
+
+                @variant dark {
+                    background-color: color-mix(in oklab, var(--color-400) 10%, transparent);
+                    color: var(--color-300);
+
+                    & > .fi-icon {
+                        color: var(--color-400);
+                    }
+                }
+            }
+
+            &:not(.fi-color) {
+                background-color: var(--m3u-hover-tint);
+            }
+        }
     }
 
     /* Pagination */
