@@ -480,9 +480,17 @@ Route::middleware(['throttle:5,1,epg-sync'])->prefix('epg')->group(function () {
  * Herd/nginx (public/m3u-tv/*); only the bare entry path falls through to
  * the router, since Herd's static-file check requires an exact file match
  * and won't resolve a directory to its index.html.
+ *
+ * The COOP/COEP headers make the page cross-origin isolated, which lets
+ * Flutter's skwasm renderer run multi-threaded (it falls back to a single
+ * thread otherwise). `credentialless` rather than `require-corp` so
+ * cross-origin posters and provider streams without CORP headers still load.
  */
 Route::get('/m3u-tv', fn () => redirect('/m3u-tv/'));
-Route::get('/m3u-tv/', fn () => response()->file(public_path('m3u-tv/index.html')));
+Route::get('/m3u-tv/', fn () => response()->file(public_path('m3u-tv/index.html'), [
+    'Cross-Origin-Opener-Policy' => 'same-origin',
+    'Cross-Origin-Embedder-Policy' => 'credentialless',
+]));
 
 /*
  * Xtream API endpoints at root
