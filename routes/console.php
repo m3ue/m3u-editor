@@ -187,4 +187,10 @@ if (config('proxy.proxy_integration_enabled', true)) {
                 }
             });
     }
+
+    // Shared per-channel timeshift buffers: stop/delete after idle_stop_seconds
+    // with no playlist fetches (on-demand, only when timeshift is enabled).
+    if (config('timeshift.enabled', true)) {
+        $inProcess('app:timeshift-reaper')->everyMinute();
+    }
 }

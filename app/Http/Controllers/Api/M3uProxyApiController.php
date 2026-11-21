@@ -17,6 +17,7 @@ use App\Services\PlaylistService;
 use App\Services\ProfileService;
 use App\Services\StreamHistoryRecorder;
 use App\Services\StreamProfileRuleEvaluator;
+use App\Services\TimeshiftBufferService;
 use App\Settings\GeneralSettings;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -97,6 +98,8 @@ class M3uProxyApiController extends Controller
                 $playlistAuthId
             );
 
+        $this->maybeKickoffTimeshift($request, $channel, $playlist, $url);
+
         $response = redirect($this->appendClientId($url, $request));
 
         // Seeking catchup players re-request this URL for every Range probe; let them reuse
@@ -106,6 +109,50 @@ class M3uProxyApiController extends Controller
         }
 
         return $response;
+    }
+
+    /**
+     * Cold timeshift: start the rolling buffer against this same pooled stream
+     * so viewer and FFmpeg share one upstream. Never waits for segments.
+     */
+    private function maybeKickoffTimeshift(Request $request, Channel $channel, $playlist, string $url): void
+    {
+        $kickoff = $request->attributes->get('timeshift_kickoff');
+        if (! is_array($kickoff) || ! isset($kickoff['channel_id'], $kickoff['playlist_uuid'])) {
+            // Also accept a bare ?timeshift=1 when the attribute wasn't set
+            // (e.g. channelPlayer called without going through handleLive).
+            if ($request->input('timeshift') !== '1' || ! config('timeshift.enabled', true)) {
+                return;
+            }
+            $kickoff = [
+                'channel_id' => $channel->id,
+                'playlist_uuid' => $playlist?->uuid ?? '',
+            ];
+        }
+        if ($kickoff['playlist_uuid'] === '') {
+            return;
+        }
+
+        $buffer = app(TimeshiftBufferService::class);
+        $playlistUuid = (string) $kickoff['playlist_uuid'];
+
+        // Start the recorder only AFTER the viewer's player has connected.
+        // m3u-proxy makes the first client on a pooled stream the "primary
+        // reader" and fans its bytes out to subscribers. Kicking off here
+        // (before the redirect is even returned) made the buffer's FFmpeg the
+        // primary, so the player rode FFmpeg's real-time read/disk pace and
+        // re-buffered periodically. Running after the response — and after a
+        // short settle — leaves the player primary and the recorder a
+        // subscriber, still on the single shared upstream connection.
+        app()->terminating(function () use ($buffer, $channel, $playlistUuid, $url): void {
+            // Flush the redirect to the client first, so it can connect (and
+            // become the proxy's primary reader) while we wait here.
+            if (function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            }
+            usleep(4_000_000);
+            $buffer->kickOff($channel, $playlistUuid, $url);
+        });
     }
 
     /**
@@ -217,6 +264,8 @@ class M3uProxyApiController extends Controller
                 $username,
                 $playlistAuthId
             );
+
+        $this->maybeKickoffTimeshift($request, $channel, $playlist, $url);
 
         return redirect($this->appendClientId($url, $request));
     }

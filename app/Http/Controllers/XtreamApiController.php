@@ -2384,6 +2384,18 @@ class XtreamApiController extends Controller
                 'delete_dvr_series_rule' => $this->deleteDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
                 'search_epg_shows' => $this->searchEpgShows($request, $dvrPlaylist, $playlistAuth),
             };
+        } elseif ($action === 'get_timeshift_config') {
+            if (! config('timeshift.enabled', true)) {
+                return response()->json(['error' => 'Timeshift is not enabled'], 403);
+            }
+
+            return response()->json([
+                'enabled' => true,
+                'window_seconds' => (int) config('timeshift.window_seconds', 10800),
+                'max_window_seconds' => (int) config('timeshift.max_window_seconds', 10800),
+                'segment_seconds' => (int) config('timeshift.segment_seconds', 2),
+                'max_concurrent' => (int) config('timeshift.max_concurrent', 20),
+            ]);
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
         }
@@ -4179,6 +4191,10 @@ class XtreamApiController extends Controller
 
         if (app(SportsService::class)->isEnabled()) {
             $features[] = 'sports';
+        }
+
+        if (config('timeshift.enabled', true)) {
+            $features[] = 'timeshift';
         }
 
         return $features;

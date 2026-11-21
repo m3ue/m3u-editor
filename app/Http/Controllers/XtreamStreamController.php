@@ -18,6 +18,7 @@ use App\Services\MediaSourcePreferenceService;
 use App\Services\PlaylistCredentialResolver;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
+use App\Services\TimeshiftBufferService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
@@ -258,6 +259,34 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
+            // Shared rolling timeshift buffer (?timeshift=1): explicit opt-in
+            // from clients with timeshift mode on.
+            //  - Warm buffer → redirect to seekable HLS window immediately.
+            //  - Cold → fall through to plain live (no wait); the proxy path
+            //    kicks the buffer off against the same pooled stream.
+            $wantsTimeshift = $request->input('timeshift') === '1' && config('timeshift.enabled', true);
+            // A .m3u8 request must be answered with real HLS on every platform:
+            // iOS/AVPlayer and web/hls.js cannot play the raw MPEG-TS plain-live
+            // fallback that a cold buffer used to serve at this URL. Only .ts
+            // requests keep the instant raw path.
+            $wantsHls = in_array(strtolower((string) $format), ['m3u8', 'hls'], true);
+            // Android/desktop opt into plain-live-first: still kick the buffer
+            // off (timeshift=1), but keep serving the smooth raw live stream
+            // until the viewer rewinds. Riding the live edge of a 2 s-segment
+            // HLS window re-buffers at every segment boundary.
+            $forcePlain = $request->input('timeshift_plain') === '1';
+            if ($wantsTimeshift && ! $forcePlain) {
+                $playbackUrl = app(TimeshiftBufferService::class)
+                    ->resolvePlaybackUrl($channel, $playlist->uuid);
+                if ($playbackUrl !== null) {
+                    return Redirect::to($playbackUrl)
+                        ->setPrivate()
+                        ->setMaxAge(10);
+                }
+                // Cold / not ready → plain live below; kickOff runs after the
+                // pooled stream URL is known (proxy branch).
+            }
+
             // Catchup (utc/lutc) requests are served from a failover with catchup when this
             // channel has none, the same as the /timeshift/ route.
             $isTimeshiftRequest = PlaylistService::isTimeshiftRequest($request);
@@ -271,6 +300,11 @@ class XtreamStreamController extends Controller
             // must be taken even if enable_proxy is off on both the channel and the
             // (possibly merged/custom) playlist being streamed through - profile
             // selection and pool distribution only happen on the proxy path.
+            // Timeshift does NOT force the proxy path: OTA/direct channels that
+            // normally bypass the proxy must keep doing so (forcing proxy broke
+            // them with 503 JSON → ExoPlayer "Source error"). kickOff only
+            // attaches to an existing proxy stream, so those channels simply
+            // get plain live with no rewind buffer.
             $needsProxy = Channel::needsProxy(
                 channelEnableProxy: (bool) $channel->enable_proxy,
                 playlistEnableProxy: (bool) $playlist->enable_proxy,
@@ -287,15 +321,42 @@ class XtreamStreamController extends Controller
                     $request->merge(['playlist_auth_id' => $playlistAuth->id]);
                 }
                 $this->applyClientStreamProfile($request, $playlist, $playlistAuth);
+                if ($wantsTimeshift) {
+                    $request->attributes->set('timeshift_kickoff', [
+                        'channel_id' => $channel->id,
+                        'playlist_uuid' => $playlist->uuid,
+                    ]);
+                }
 
                 // player=true signals an in-app player request — route to channelPlayer
                 // so the in-app transcoding profile is applied instead of the playlist profile
                 $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
 
-                return app()->call([app(M3uProxyApiController::class), $method], [
+                $proxyResponse = app()->call([app(M3uProxyApiController::class), $method], [
                     'id' => $streamChannel->id,
                     'uuid' => $playlist->uuid,
                 ]);
+
+                // HLS-first cold timeshift is only for clients that cannot play
+                // the raw MPEG-TS plain-live fallback (AVPlayer/hls.js). Those
+                // opt in with timeshift_hls=1. Android/desktop/mpv clients keep
+                // the smooth plain-live-first path and switch to the HLS window
+                // on rewind (when they're behind the edge, so it never stalls).
+                if (
+                    $wantsTimeshift
+                    && $wantsHls
+                    && config('timeshift.hls_first_cold', true)
+                    && $request->input('timeshift_hls') === '1'
+                    && $proxyResponse instanceof RedirectResponse
+                ) {
+                    $bufferId = TimeshiftBufferService::bufferIdFor($channel);
+
+                    return Redirect::to(
+                        app(TimeshiftBufferService::class)->signedPlaylistUrl($bufferId)
+                    )->setPrivate()->setMaxAge(10);
+                }
+
+                return $proxyResponse;
             } else {
                 // Get the base stream URL
                 $streamUrl = PlaylistUrlService::getChannelUrl($streamChannel, $playlist);
