@@ -26,7 +26,8 @@ class RecordingResource extends JsonResource
     {
         $programmeData = $this->epg_programme_data ?? [];
         $isCompleted = $this->status === DvrRecordingStatus::Completed;
-        $isLive = $this->status === DvrRecordingStatus::Recording && $this->proxy_network_id;
+        $isLive = in_array($this->status, [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing], true)
+            && $this->proxy_network_id;
 
         $fileUrl = match (true) {
             $isLive => route('dispatcharr.dvr.recordings.hls', ['id' => $this->id, 'path' => 'index.m3u8'], false),

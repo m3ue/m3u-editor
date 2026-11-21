@@ -117,7 +117,26 @@ it('builds in-progress recording live urls on the host and port the client used'
     $item = xtreamDvrUrlRecordingsResponse($this)[0];
 
     expect($item['live_url'])->toBe("http://192.168.1.50:36400/dvr/dvr-user/dvr-pass/{$recording->uuid}/live.m3u8")
-        ->and($item['stream_url'])->toBeNull();
+        ->and($item['stream_url'])->toBeNull()
+        ->and($item['elapsed_seconds'])->toBeInt();
+});
+
+it('keeps live_url available during post_processing while the proxy broadcast still exists', function () {
+    useXtreamDvrUrlOverride();
+    $recording = makeXtreamDvrUrlRecording($this, DvrRecordingStatus::Recording);
+    $recording->forceFill([
+        'status' => DvrRecordingStatus::PostProcessing,
+        'proxy_network_id' => $recording->uuid,
+        'actual_start' => now()->subMinutes(5),
+        'actual_end' => now(),
+    ])->save();
+
+    $item = xtreamDvrUrlRecordingsResponse($this)[0];
+
+    expect($item['status'])->toBe('post_processing')
+        ->and($item['live_url'])->toBe("http://192.168.1.50:36400/dvr/dvr-user/dvr-pass/{$recording->uuid}/live.m3u8")
+        ->and($item['stream_url'])->toBeNull()
+        ->and($item['elapsed_seconds'])->toBeGreaterThanOrEqual(299);
 });
 
 it('uses the url override for recording urls when one is set', function () {
