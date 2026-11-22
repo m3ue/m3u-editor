@@ -204,91 +204,83 @@ class ManageTvAppSettings extends BaseSettingsPage
                 Section::make(__('Push Notifications (Mobile)'))
                     ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed.'))
                     ->icon('heroicon-m-device-phone-mobile')
-                    ->headerActions([
-                        Action::make(__('Manage Devices'))
-                            ->label(__('Manage Devices'))
-                            ->icon('heroicon-o-device-phone-mobile')
-                            ->url(TvDeviceResource::getUrl())
-                            ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
-                        Action::make('test_push_relay')
-                            ->label(__('Send Push Notification'))
-                            ->icon('heroicon-o-paper-airplane')
-                            ->visible(fn (Get $get): bool => (bool) $get('push_relay_enabled') && app(PushRelayService::class)->isEnabled())
-                            ->schema([
-                                Select::make('device_id')
-                                    ->label(__('Registered device'))
-                                    ->required()
-                                    ->searchable()
-                                    ->options(fn (): array => PushDeviceToken::query()
-                                        ->latest()
-                                        ->limit(50)
-                                        ->get()
-                                        ->mapWithKeys(fn (PushDeviceToken $d) => [
-                                            $d->id => "{$d->notifiable?->name} ({$d->platform}, ".$d->last_seen_at?->diffForHumans().')',
-                                        ])
-                                        ->all()),
-                            ])
-                            ->action(function (array $data): void {
-                                $device = PushDeviceToken::find($data['device_id']);
-
-                                if (! $device) {
-                                    Notification::make()
-                                        ->danger()
-                                        ->title(__('Device not found'))
-                                        ->send();
-
-                                    return;
-                                }
-
-                                try {
-                                    app(PushRelayService::class)->send(
-                                        $device->token,
-                                        $device->platform,
-                                        '[TEST] m3u editor',
-                                        __('This is a test push notification. Your push relay integration is working correctly.'),
-                                    );
-
-                                    Notification::make()
-                                        ->success()
-                                        ->title(__('Test Push Sent'))
-                                        ->body(__('Check the device for the test notification.'))
-                                        ->send();
-                                } catch (Exception $e) {
-                                    Notification::make()
-                                        ->danger()
-                                        ->title(__('Failed to Send Push'))
-                                        ->body($e->getMessage())
-                                        ->send();
-                                }
-                            }),
-                        Action::make('view_relay_status')
-                            ->label(__('View Relay Status'))
-                            ->color('gray')
-                            ->icon('heroicon-o-arrow-top-right-on-square')
-                            ->url(config('services.push_relay.status_monitor_url'))
-                            ->openUrlInNewTab()
-                            ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
-                    ])
                     ->schema([
-                        Callout::make()
-                            ->info()
-                            ->description(__('The relay forwards TV notifications to Apple/Google push services so the mobile app can receive them while backgrounded or closed.')),
                         Toggle::make('push_relay_enabled')
                             ->label(__('Enable push relay'))
                             ->helperText(__('When enabled, TV notifications are also forwarded to registered mobile devices through the public relay.'))
                             ->live(),
+                        Actions::make([
+                            Action::make(__('Manage Devices'))
+                                ->label(__('Manage Devices'))
+                                ->icon('heroicon-o-device-phone-mobile')
+                                ->url(TvDeviceResource::getUrl())
+                                ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
+                            Action::make('test_push_relay')
+                                ->label(__('Send Push Notification'))
+                                ->icon('heroicon-o-paper-airplane')
+                                ->visible(fn (Get $get): bool => (bool) $get('push_relay_enabled') && app(PushRelayService::class)->isEnabled())
+                                ->schema([
+                                    Select::make('device_id')
+                                        ->label(__('Registered device'))
+                                        ->required()
+                                        ->searchable()
+                                        ->options(fn (): array => PushDeviceToken::query()
+                                            ->latest()
+                                            ->limit(50)
+                                            ->get()
+                                            ->mapWithKeys(fn (PushDeviceToken $d) => [
+                                                $d->id => "{$d->notifiable?->name} ({$d->platform}, ".$d->last_seen_at?->diffForHumans().')',
+                                            ])
+                                            ->all()),
+                                ])
+                                ->action(function (array $data): void {
+                                    $device = PushDeviceToken::find($data['device_id']);
+
+                                    if (! $device) {
+                                        Notification::make()
+                                            ->danger()
+                                            ->title(__('Device not found'))
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    try {
+                                        app(PushRelayService::class)->send(
+                                            $device->token,
+                                            $device->platform,
+                                            '[TEST] m3u editor',
+                                            __('This is a test push notification. Your push relay integration is working correctly.'),
+                                        );
+
+                                        Notification::make()
+                                            ->success()
+                                            ->title(__('Test Push Sent'))
+                                            ->body(__('Check the device for the test notification.'))
+                                            ->send();
+                                    } catch (Exception $e) {
+                                        Notification::make()
+                                            ->danger()
+                                            ->title(__('Failed to Send Push'))
+                                            ->body($e->getMessage())
+                                            ->send();
+                                    }
+                                }),
+                            Action::make('view_relay_status')
+                                ->label(__('View Relay Status'))
+                                ->color('gray')
+                                ->icon('heroicon-o-arrow-top-right-on-square')
+                                ->url(config('services.push_relay.status_monitor_url'))
+                                ->openUrlInNewTab()
+                                ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
+
+                        ])
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make(__('Device Pairing'))
-                    ->description(__('Let M3U TV request a short pairing code instead of typing a password on the remote. The admin enters the code here and picks which credential to sign the TV in with.'))
+                    ->description(__('Sign M3U TV in with a short pairing code instead of typing a password on the remote.'))
                     ->icon('heroicon-m-qr-code')
-                    ->headerActions([
-                        Action::make(__('Pair a Device'))
-                            ->label(__('Pair a Device'))
-                            ->icon('heroicon-o-qr-code')
-                            ->url(PairDevice::getUrl())
-                            ->hidden(fn (Get $get): bool => ! (bool) $get('device_pairing_enabled') || ! (bool) (app(GeneralSettings::class)->app_output_enabled ?? true)),
-                    ])
                     ->schema([
                         Callout::make()
                             ->warning()
@@ -296,13 +288,22 @@ class ManageTvAppSettings extends BaseSettingsPage
                             ->hidden(fn (): bool => (bool) (app(GeneralSettings::class)->app_output_enabled ?? true)),
                         Toggle::make('device_pairing_enabled')
                             ->label(__('Enable device pairing'))
-                            ->helperText(__('When enabled, M3U TV can request a pairing code and the "Device Pairing" tab is available under Devices. Disabling this hides the tab and rejects any in-flight pairing requests.'))
+                            ->helperText(__('Lets M3U TV request pairing codes and shows the "Device Pairing" tab under Devices. Turning it off rejects pending requests.'))
                             ->disabled(fn (): bool => ! (bool) (app(GeneralSettings::class)->app_output_enabled ?? true))
                             ->live(),
+                        Actions::make([
+                            Action::make(__('Pair a Device'))
+                                ->label(__('Pair a Device'))
+                                ->icon('heroicon-o-qr-code')
+                                ->url(PairDevice::getUrl())
+                                ->hidden(fn (Get $get): bool => ! (bool) $get('device_pairing_enabled') || ! (bool) (app(GeneralSettings::class)->app_output_enabled ?? true)),
+
+                        ])
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make(__('Notification Channels'))
-                    ->description(__('Define the notification channels available in the TV app. Users can subscribe to specific channels so they only receive relevant notifications. Channels not listed here are still usable - they appear automatically once a notification arrives on that channel.'))
+                    ->description(__('Channels users can subscribe to in the TV app. Unlisted channels still appear once a notification uses them.'))
                     ->icon('heroicon-m-tag')
                     ->collapsed()
                     ->schema([
@@ -341,7 +342,7 @@ class ManageTvAppSettings extends BaseSettingsPage
             : __(':version (build :build)', ['version' => $release['version'], 'build' => $release['build_number']]);
 
         return Section::make(__('Web App'))
-            ->description(__('Play M3U TV in a browser at /m3u-tv/ on this server. The web app installs and updates from M3U TV releases, independently of M3U Editor updates.'))
+            ->description(__('Play M3U TV in your browser at /m3u-tv/. Updates separately from M3U Editor.'))
             ->icon('heroicon-m-globe-alt')
             ->schema([
                 Grid::make()->columns(2)->schema([

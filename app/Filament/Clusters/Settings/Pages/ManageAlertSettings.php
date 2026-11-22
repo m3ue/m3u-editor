@@ -14,6 +14,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
@@ -61,43 +62,6 @@ class ManageAlertSettings extends BaseSettingsPage
                             ->schema([
                                 Section::make(__('Discord'))
                                     ->description(__('Send alerts to a Discord channel via an incoming webhook.'))
-                                    ->headerActions([
-                                        Action::make('test_discord_alert')
-                                            ->label(__('Send test alert'))
-                                            ->icon('heroicon-o-paper-airplane')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled') && ! empty($get('discord_webhook_url')))
-                                            ->action(function (Get $get): void {
-                                                $webhookUrl = $get('discord_webhook_url');
-
-                                                if (empty($webhookUrl)) {
-                                                    Notification::make()
-                                                        ->title(__('No Webhook URL'))
-                                                        ->body(__('Please enter a Discord webhook URL first.'))
-                                                        ->warning()
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                try {
-                                                    DiscordAlert::to($webhookUrl)->message('[TEST] This is a test alert from m3u-editor. Your Discord integration is working correctly.');
-
-                                                    Notification::make()
-                                                        ->title(__('Test Alert Sent'))
-                                                        ->body(__('Check your Discord channel for the test message.'))
-                                                        ->success()
-                                                        ->send();
-                                                } catch (Exception $e) {
-                                                    Notification::make()
-                                                        ->title(__('Failed to Send Alert'))
-                                                        ->body($e->getMessage())
-                                                        ->danger()
-                                                        ->send();
-                                                }
-                                            }),
-                                    ])
                                     ->schema([
                                         Toggle::make('discord_alerts_enabled')
                                             ->label(__('Enable Discord alerts'))
@@ -111,6 +75,44 @@ class ManageAlertSettings extends BaseSettingsPage
                                             ->helperText(__('Create an Incoming Webhook in your Discord server settings and paste the URL here.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled'))
                                             ->columnSpanFull(),
+                                        Actions::make([
+                                            Action::make('test_discord_alert')
+                                                ->label(__('Send test alert'))
+                                                ->icon('heroicon-o-paper-airplane')
+                                                ->color('gray')
+                                                ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled') && ! empty($get('discord_webhook_url')))
+                                                ->action(function (Get $get): void {
+                                                    $webhookUrl = $get('discord_webhook_url');
+
+                                                    if (empty($webhookUrl)) {
+                                                        Notification::make()
+                                                            ->title(__('No Webhook URL'))
+                                                            ->body(__('Please enter a Discord webhook URL first.'))
+                                                            ->warning()
+                                                            ->send();
+
+                                                        return;
+                                                    }
+
+                                                    try {
+                                                        DiscordAlert::to($webhookUrl)->message('[TEST] This is a test alert from m3u-editor. Your Discord integration is working correctly.');
+
+                                                        Notification::make()
+                                                            ->title(__('Test Alert Sent'))
+                                                            ->body(__('Check your Discord channel for the test message.'))
+                                                            ->success()
+                                                            ->send();
+                                                    } catch (Exception $e) {
+                                                        Notification::make()
+                                                            ->title(__('Failed to Send Alert'))
+                                                            ->body($e->getMessage())
+                                                            ->danger()
+                                                            ->send();
+                                                    }
+                                                }),
+
+                                        ])
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
                         Tab::make(__('Slack'))
@@ -119,43 +121,6 @@ class ManageAlertSettings extends BaseSettingsPage
                             ->schema([
                                 Section::make(__('Slack'))
                                     ->description(__('Send alerts to a Slack channel via an incoming webhook.'))
-                                    ->headerActions([
-                                        Action::make('test_slack_alert')
-                                            ->label(__('Send test alert'))
-                                            ->icon('heroicon-o-paper-airplane')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled') && ! empty($get('slack_webhook_url')))
-                                            ->action(function (Get $get): void {
-                                                $webhookUrl = $get('slack_webhook_url');
-
-                                                if (empty($webhookUrl)) {
-                                                    Notification::make()
-                                                        ->title(__('No Webhook URL'))
-                                                        ->body(__('Please enter a Slack webhook URL first.'))
-                                                        ->warning()
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                try {
-                                                    SlackAlert::to($webhookUrl)->sync()->message('[TEST] This is a test alert from m3u-editor. Your Slack integration is working correctly.');
-
-                                                    Notification::make()
-                                                        ->title(__('Test Alert Sent'))
-                                                        ->body(__('Check your Slack channel for the test message.'))
-                                                        ->success()
-                                                        ->send();
-                                                } catch (Exception $e) {
-                                                    Notification::make()
-                                                        ->title(__('Failed to Send Alert'))
-                                                        ->body($e->getMessage())
-                                                        ->danger()
-                                                        ->send();
-                                                }
-                                            }),
-                                    ])
                                     ->schema([
                                         Toggle::make('slack_alerts_enabled')
                                             ->label(__('Enable Slack alerts'))
@@ -229,6 +194,44 @@ HTML))
                                             ->helperText(__('Follow the setup guide above to create a Slack App and generate a webhook URL.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled'))
                                             ->columnSpanFull(),
+                                        Actions::make([
+                                            Action::make('test_slack_alert')
+                                                ->label(__('Send test alert'))
+                                                ->icon('heroicon-o-paper-airplane')
+                                                ->color('gray')
+                                                ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled') && ! empty($get('slack_webhook_url')))
+                                                ->action(function (Get $get): void {
+                                                    $webhookUrl = $get('slack_webhook_url');
+
+                                                    if (empty($webhookUrl)) {
+                                                        Notification::make()
+                                                            ->title(__('No Webhook URL'))
+                                                            ->body(__('Please enter a Slack webhook URL first.'))
+                                                            ->warning()
+                                                            ->send();
+
+                                                        return;
+                                                    }
+
+                                                    try {
+                                                        SlackAlert::to($webhookUrl)->sync()->message('[TEST] This is a test alert from m3u-editor. Your Slack integration is working correctly.');
+
+                                                        Notification::make()
+                                                            ->title(__('Test Alert Sent'))
+                                                            ->body(__('Check your Slack channel for the test message.'))
+                                                            ->success()
+                                                            ->send();
+                                                    } catch (Exception $e) {
+                                                        Notification::make()
+                                                            ->title(__('Failed to Send Alert'))
+                                                            ->body($e->getMessage())
+                                                            ->danger()
+                                                            ->send();
+                                                    }
+                                                }),
+
+                                        ])
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
                         Tab::make(__('Telegram'))
@@ -237,45 +240,6 @@ HTML))
                             ->schema([
                                 Section::make(__('Telegram'))
                                     ->description(__('Send alerts to a Telegram chat via a bot.'))
-                                    ->headerActions([
-                                        Action::make('test_telegram_alert')
-                                            ->label(__('Send test alert'))
-                                            ->icon('heroicon-o-paper-airplane')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->visible(fn (Get $get): bool => (bool) $get('telegram_alerts_enabled') && ! empty($get('telegram_bot_token')) && ! empty($get('telegram_chat_id')))
-                                            ->action(function (Get $get): void {
-                                                $botToken = $get('telegram_bot_token');
-                                                $chatId = $get('telegram_chat_id');
-
-                                                if (empty($botToken) || empty($chatId)) {
-                                                    Notification::make()
-                                                        ->title(__('Missing Bot Token or Chat ID'))
-                                                        ->body(__('Please enter a Telegram bot token and chat ID first.'))
-                                                        ->warning()
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                try {
-                                                    NotificationFacade::route('telegram', $chatId)
-                                                        ->notifyNow(new TelegramAlert('[TEST] This is a test alert from m3u-editor. Your Telegram integration is working correctly.', Crypt::encryptString($botToken)));
-
-                                                    Notification::make()
-                                                        ->title(__('Test Alert Sent'))
-                                                        ->body(__('Check your Telegram chat for the test message.'))
-                                                        ->success()
-                                                        ->send();
-                                                } catch (Exception $e) {
-                                                    Notification::make()
-                                                        ->title(__('Failed to Send Alert'))
-                                                        ->body(__('Could not send the test alert. Check your bot token and chat ID and try again.'))
-                                                        ->danger()
-                                                        ->send();
-                                                }
-                                            }),
-                                    ])
                                     ->schema([
                                         Toggle::make('telegram_alerts_enabled')
                                             ->label(__('Enable Telegram alerts'))
@@ -311,6 +275,46 @@ HTML))
                                             ->helperText(__('The ID of the chat, group or channel to send alerts to.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('telegram_alerts_enabled'))
                                             ->columnSpanFull(),
+                                        Actions::make([
+                                            Action::make('test_telegram_alert')
+                                                ->label(__('Send test alert'))
+                                                ->icon('heroicon-o-paper-airplane')
+                                                ->color('gray')
+                                                ->visible(fn (Get $get): bool => (bool) $get('telegram_alerts_enabled') && ! empty($get('telegram_bot_token')) && ! empty($get('telegram_chat_id')))
+                                                ->action(function (Get $get): void {
+                                                    $botToken = $get('telegram_bot_token');
+                                                    $chatId = $get('telegram_chat_id');
+
+                                                    if (empty($botToken) || empty($chatId)) {
+                                                        Notification::make()
+                                                            ->title(__('Missing Bot Token or Chat ID'))
+                                                            ->body(__('Please enter a Telegram bot token and chat ID first.'))
+                                                            ->warning()
+                                                            ->send();
+
+                                                        return;
+                                                    }
+
+                                                    try {
+                                                        NotificationFacade::route('telegram', $chatId)
+                                                            ->notifyNow(new TelegramAlert('[TEST] This is a test alert from m3u-editor. Your Telegram integration is working correctly.', Crypt::encryptString($botToken)));
+
+                                                        Notification::make()
+                                                            ->title(__('Test Alert Sent'))
+                                                            ->body(__('Check your Telegram chat for the test message.'))
+                                                            ->success()
+                                                            ->send();
+                                                    } catch (Exception $e) {
+                                                        Notification::make()
+                                                            ->title(__('Failed to Send Alert'))
+                                                            ->body(__('Could not send the test alert. Check your bot token and chat ID and try again.'))
+                                                            ->danger()
+                                                            ->send();
+                                                    }
+                                                }),
+
+                                        ])
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
                         Tab::make(__('Email'))
@@ -320,58 +324,6 @@ HTML))
                                 Section::make(__('Email'))
                                     ->key('email-alerts')
                                     ->description(__('Send alerts by email using the shared SMTP settings.'))
-                                    ->headerActions([
-                                        Action::make('test_email_alert')
-                                            ->label(__('Send test alert'))
-                                            ->icon('heroicon-o-paper-airplane')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->visible(fn (Get $get): bool => (bool) $get('email_alerts_enabled') && ! empty($get('email_alerts_recipients')))
-                                            ->action(function (Get $get, SmtpMailService $smtp): void {
-                                                $recipients = array_values(array_filter((array) $get('email_alerts_recipients')));
-
-                                                if ($recipients === []) {
-                                                    Notification::make()
-                                                        ->title(__('No Recipients'))
-                                                        ->body(__('Please add at least one email recipient first.'))
-                                                        ->warning()
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                if (! $smtp->isConfigured()) {
-                                                    Notification::make()
-                                                        ->title(__('SMTP Not Configured'))
-                                                        ->body(__('Configure the SMTP settings under Settings > SMTP first.'))
-                                                        ->warning()
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                try {
-                                                    // Send inline through the same path queued alerts use, so errors surface here.
-                                                    (new SendAlertEmail(
-                                                        recipients: $recipients,
-                                                        emailSubject: AlertService::EMAIL_SUBJECT,
-                                                        body: '[TEST] This is a test alert from m3u-editor. Your email alert integration is working correctly.',
-                                                    ))->handle($smtp);
-
-                                                    Notification::make()
-                                                        ->title(__('Test Alert Sent'))
-                                                        ->body(__('Check your inbox for the test message.'))
-                                                        ->success()
-                                                        ->send();
-                                                } catch (Exception $e) {
-                                                    Notification::make()
-                                                        ->title(__('Failed to Send Alert'))
-                                                        ->body(__('Could not send the test alert. Check your SMTP settings and recipients and try again.'))
-                                                        ->danger()
-                                                        ->send();
-                                                }
-                                            }),
-                                    ])
                                     ->schema([
                                         Toggle::make('email_alerts_enabled')
                                             ->label(__('Enable email alerts'))
@@ -398,6 +350,59 @@ HTML))
                                             ->nestedRecursiveRules(['email'])
                                             ->requiredIf('email_alerts_enabled', true)
                                             ->visible(fn (Get $get): bool => (bool) $get('email_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                        Actions::make([
+                                            Action::make('test_email_alert')
+                                                ->label(__('Send test alert'))
+                                                ->icon('heroicon-o-paper-airplane')
+                                                ->color('gray')
+                                                ->visible(fn (Get $get): bool => (bool) $get('email_alerts_enabled') && ! empty($get('email_alerts_recipients')))
+                                                ->action(function (Get $get, SmtpMailService $smtp): void {
+                                                    $recipients = array_values(array_filter((array) $get('email_alerts_recipients')));
+
+                                                    if ($recipients === []) {
+                                                        Notification::make()
+                                                            ->title(__('No Recipients'))
+                                                            ->body(__('Please add at least one email recipient first.'))
+                                                            ->warning()
+                                                            ->send();
+
+                                                        return;
+                                                    }
+
+                                                    if (! $smtp->isConfigured()) {
+                                                        Notification::make()
+                                                            ->title(__('SMTP Not Configured'))
+                                                            ->body(__('Configure the SMTP settings under Settings > SMTP first.'))
+                                                            ->warning()
+                                                            ->send();
+
+                                                        return;
+                                                    }
+
+                                                    try {
+                                                        // Send inline through the same path queued alerts use, so errors surface here.
+                                                        (new SendAlertEmail(
+                                                            recipients: $recipients,
+                                                            emailSubject: AlertService::EMAIL_SUBJECT,
+                                                            body: '[TEST] This is a test alert from m3u-editor. Your email alert integration is working correctly.',
+                                                        ))->handle($smtp);
+
+                                                        Notification::make()
+                                                            ->title(__('Test Alert Sent'))
+                                                            ->body(__('Check your inbox for the test message.'))
+                                                            ->success()
+                                                            ->send();
+                                                    } catch (Exception $e) {
+                                                        Notification::make()
+                                                            ->title(__('Failed to Send Alert'))
+                                                            ->body(__('Could not send the test alert. Check your SMTP settings and recipients and try again.'))
+                                                            ->danger()
+                                                            ->send();
+                                                    }
+                                                }),
+
+                                        ])
                                             ->columnSpanFull(),
                                     ]),
                             ]),

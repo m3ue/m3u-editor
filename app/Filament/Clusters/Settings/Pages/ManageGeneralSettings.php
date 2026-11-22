@@ -50,7 +50,7 @@ class ManageGeneralSettings extends BaseSettingsPage
                         ->label(__('Message'))
                         ->required()
                         ->default('Testing WebSocket connection')
-                        ->helperText(__('This message will be sent to the WebSocket server and displayed as a pop-up notification. If you do not see a notification shortly after sending, there is likely an issue with your WebSocket configuration.')),
+                        ->helperText(__('Sent through the WebSocket server as a pop-up notification. If nothing appears, check your WebSocket configuration.')),
                 ])
                 ->action(function (array $data): void {
                     Notification::make()
@@ -186,7 +186,7 @@ class ManageGeneralSettings extends BaseSettingsPage
                                 TextInput::make('app_timezone')
                                     ->label(__('Application Timezone'))
                                     ->placeholder(__('UTC'))
-                                    ->helperText(__('Override the application timezone. Leave empty to use the server default (UTC). Takes effect for all date/time output throughout the app.'))
+                                    ->helperText(__('Leave empty to use the server default (UTC). Applies to all dates and times in the app.'))
                                     ->disabled(fn () => ! empty(config('dev.timezone')))
                                     ->hint(fn () => ! empty(config('dev.timezone')) ? __('Already set by environment variable!') : null)
                                     ->dehydrated(fn () => empty(config('dev.timezone')))
@@ -254,7 +254,7 @@ class ManageGeneralSettings extends BaseSettingsPage
                             ->label(__('Allowed domains'))
                             ->columnSpanFull()
                             ->placeholder(fn () => config('dev.allowed_playlist_domains') ? null : '*.example.com*')
-                            ->helperText(__('List of allowed domains (supports wildcards, e.g. *.example.com*). Press [tab] or [return] to add item. When set, playlist URLs must match one of these patterns.'))
+                            ->helperText(__('When set, playlist URLs must match one of these domains. Wildcards are supported, e.g. *.example.com*.'))
                             ->disabled(fn () => ! empty(config('dev.allowed_playlist_domains')))
                             ->hint(fn () => ! empty(config('dev.allowed_playlist_domains')) ? __('Already set by environment variable!') : null)
                             ->default(fn () => ! empty(config('dev.allowed_playlist_domains'))

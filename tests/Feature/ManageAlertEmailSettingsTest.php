@@ -66,7 +66,7 @@ it('sends a test alert email to the entered recipients', function () {
             'email_alerts_enabled' => true,
             'email_alerts_recipients' => ['owner@example.com'],
         ])
-        ->callAction(TestAction::make('test_email_alert')->schemaComponent('email-alerts'))
+        ->callAction(TestAction::make('test_email_alert')->schemaComponent())
         ->assertNotified(__('Test Alert Sent'));
 
     Mail::assertSent(AlertMail::class, fn (AlertMail $mail): bool => $mail->hasTo('owner@example.com')
@@ -82,7 +82,7 @@ it('warns instead of sending a test alert when smtp is not configured', function
             'email_alerts_enabled' => true,
             'email_alerts_recipients' => ['owner@example.com'],
         ])
-        ->callAction(TestAction::make('test_email_alert')->schemaComponent('email-alerts'))
+        ->callAction(TestAction::make('test_email_alert')->schemaComponent())
         ->assertNotified(__('SMTP Not Configured'));
 
     Mail::assertNothingSent();

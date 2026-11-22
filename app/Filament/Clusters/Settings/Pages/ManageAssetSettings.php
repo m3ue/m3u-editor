@@ -12,6 +12,7 @@ use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
@@ -88,16 +89,6 @@ class ManageAssetSettings extends BaseSettingsPage
                 Section::make(__('Logo Cache'))
                     ->description(__('Manage logo cache behavior and storage used by logo proxy URLs.'))
                     ->columns(1)
-                    ->headerActions([
-                        Action::make('view_repo')
-                            ->label(__('View Logo Repository'))
-                            ->icon('heroicon-o-arrow-top-right-on-square')
-                            ->iconPosition('after')
-                            ->size('sm')
-                            ->url('/logo-repository')
-                            ->hidden(fn ($get) => ! $get('logo_repository_enabled'))
-                            ->openUrlInNewTab(true),
-                    ])
                     ->schema([
                         Toggle::make('logo_cache_permanent')
                             ->label(__('Keep cache permanently (disable expiry cleanup)'))
@@ -107,9 +98,20 @@ class ManageAssetSettings extends BaseSettingsPage
                             ->live()
                             ->helperText(__('When enabled, /logo-repository endpoints are publicly accessible for apps like UHF.')),
 
+                        Actions::make([
+                            Action::make('view_repo')
+                                ->label(__('View Logo Repository'))
+                                ->icon('heroicon-o-arrow-top-right-on-square')
+                                ->iconPosition('after')
+                                ->url('/logo-repository')
+                                ->hidden(fn ($get) => ! $get('logo_repository_enabled'))
+                                ->openUrlInNewTab(true),
+
+                        ])
+                            ->columnSpanFull(),
                     ]),
                 Section::make(__('Image Optimization'))
-                    ->description(__('Artwork from the logo proxy, media servers and Schedules Direct is cached as a downscaled copy sized for where it is shown, so clients download a right-sized image instead of the full-resolution source.'))
+                    ->description(__('Cache artwork from the logo proxy, media servers and Schedules Direct as right-sized copies instead of full-resolution originals.'))
                     ->columns(2)
                     ->schema([
                         Toggle::make('image_optimization_enabled')
@@ -124,7 +126,7 @@ class ManageAssetSettings extends BaseSettingsPage
                                     $component->state((bool) config('proxy.image_resize_enabled'));
                                 }
                             })
-                            ->helperText(__('When disabled, artwork is cached and served at its original size. Changing a size below creates new cached copies; old ones expire or can be cleared from Manage Assets.')),
+                            ->helperText(__('When off, artwork is served at its original size. Size changes apply to newly cached copies.')),
                         ...array_map(fn (ImageProfile $profile): TextInput => $this->profileWidthInput($profile), ImageProfile::cases()),
                         TextInput::make('image_quality')
                             ->label(__('Image quality'))

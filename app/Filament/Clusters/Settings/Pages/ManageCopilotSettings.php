@@ -63,7 +63,7 @@ class ManageCopilotSettings extends BaseSettingsPage
         return $schema
             ->components([
                 Section::make(__('AI Copilot'))
-                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect. Look for the ✨ AI Copilot icon in the top navigation bar after enabling.'))
+                    ->description(__('Save and refresh the page to apply changes. Once enabled, look for the ✨ icon in the top bar.'))
                     ->schema([
                         Toggle::make('copilot_enabled')
                             ->label(__('Enable AI Copilot'))

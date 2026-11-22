@@ -52,7 +52,7 @@ class ManageApiSettings extends BaseSettingsPage
                     ->schema([
                         Toggle::make('show_api_docs')
                             ->label(__('Allow access to API docs'))
-                            ->helperText(__('When enabled you can access the API documentation using the "API Docs" button. When disabled, the docs endpoint will return a 403 (Unauthorized). NOTE: The API will respond regardless of this setting. You do not need to enable it to use the API.')),
+                            ->helperText(__('Serves the API docs at /docs/api. When off, the docs return 403. The API works either way.')),
                     ]),
             ]);
     }

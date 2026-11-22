@@ -37,11 +37,6 @@ class ManageNavigationSettings extends BaseSettingsPage
         return __('Navigation');
     }
 
-    public function getSubheading(): ?string
-    {
-        return __('Hide, show, and reorder the admin sidebar for every user. Names and icons are fixed.');
-    }
-
     protected function getHeaderActions(): array
     {
         return [
@@ -97,7 +92,7 @@ class ManageNavigationSettings extends BaseSettingsPage
                 Callout::make()
                     ->info()
                     ->columnSpanFull()
-                    ->description(__('Drag and drop to reorder groups and items. Toggle visibility to hide or show them. You will need to refresh the page to see the changes take effect.')),
+                    ->description(__('Drag to reorder groups and items, and toggle to hide or show them. Refresh the page to see changes.')),
                 Repeater::make('groups')
                     ->hiddenLabel()
                     ->reorderable()

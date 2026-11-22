@@ -16,6 +16,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -228,7 +229,7 @@ class ManageProxySettings extends BaseSettingsPage
                                 tooltip: __('When a playlist has a connection limit and it\'s reached, enabling this will automatically stop the oldest active stream to make room for the new request. This is useful for single-connection providers where you want instant channel switching. Note: This may cause issues if multiple clients share the same playlist - the newest request always wins.')
                             )
                             ->default(false)
-                            ->helperText(__('Enable to allow new stream requests to automatically stop the oldest stream when a playlist reaches its connection limit. Disabled by default.')),
+                            ->helperText(__('Stop the oldest stream when a playlist reaches its connection limit.')),
 
                         Toggle::make('url_override_include_logos')
                             ->label(__('Include logos in proxy URL override'))
@@ -253,41 +254,6 @@ class ManageProxySettings extends BaseSettingsPage
                 Section::make(__('Failover & Recovery'))
                     ->description(__('Configure how the proxy handles stream failures, including advanced resolver logic and fail conditions.'))
                     ->columnSpanFull()
-                    ->headerActions([
-                        Action::make('test_failover_connection')
-                            ->label(__('Test resolver connection'))
-                            ->icon('heroicon-m-signal')
-                            ->disabled(fn ($get) => empty($get('failover_resolver_url')))
-                            ->action(function ($get) use ($service) {
-                                $configUrl = config('proxy.m3u_resolver_url');
-                                $url = $configUrl ?? $get('failover_resolver_url');
-                                $url = rtrim($url, '/');
-                                $result = $service->testResolver($url);
-
-                                if ($result['success']) {
-                                    Notification::make()
-                                        ->success()
-                                        ->title(__('Connection Successful'))
-                                        ->body(Str::markdown(
-                                            "**Proxy can reach the editor!**\n\n".
-                                                "URL tested: `{$result['url_tested']}`\n\n"
-                                        ))
-                                        ->duration(8000)
-                                        ->send();
-                                } else {
-                                    Notification::make()
-                                        ->danger()
-                                        ->title(__('Connection Failed'))
-                                        ->body(Str::markdown(
-                                            "**The proxy cannot reach the editor**\n\n".
-                                                $result['message']."\n\n".
-                                                'Please verify the Failover Resolver URL is correct and accessible from the proxy container/service.'
-                                        ))
-                                        ->duration(10000)
-                                        ->send();
-                                }
-                            }),
-                    ])
                     ->schema([
                         TextInput::make('failover_resolver_url')
                             ->extraInputAttributes(['class' => 'privacy-sensitive'])
@@ -300,6 +266,43 @@ class ManageProxySettings extends BaseSettingsPage
                                 tooltip: __('This should be the LAN address of the editor for the proxy to access. The resolver URL is used for advanced failover logic, webhook registration for pooled providers, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.')
                             )
                             ->prefixIcon('heroicon-m-link')
+                            ->suffixAction(
+                                Action::make('test_failover_connection')
+                                    ->label(__('Test connection'))
+                                    ->link()
+                                    ->color('gray')
+                                    ->icon('heroicon-m-signal')
+                                    ->disabled(fn ($get) => empty($get('failover_resolver_url')))
+                                    ->action(function ($get) use ($service) {
+                                        $configUrl = config('proxy.m3u_resolver_url');
+                                        $url = $configUrl ?? $get('failover_resolver_url');
+                                        $url = rtrim($url, '/');
+                                        $result = $service->testResolver($url);
+
+                                        if ($result['success']) {
+                                            Notification::make()
+                                                ->success()
+                                                ->title(__('Connection Successful'))
+                                                ->body(Str::markdown(
+                                                    "**Proxy can reach the editor!**\n\n".
+                                                        "URL tested: `{$result['url_tested']}`\n\n"
+                                                ))
+                                                ->duration(8000)
+                                                ->send();
+                                        } else {
+                                            Notification::make()
+                                                ->danger()
+                                                ->title(__('Connection Failed'))
+                                                ->body(Str::markdown(
+                                                    "**The proxy cannot reach the editor**\n\n".
+                                                        $result['message']."\n\n".
+                                                        'Please verify the Failover Resolver URL is correct and accessible from the proxy container/service.'
+                                                ))
+                                                ->duration(10000)
+                                                ->send();
+                                        }
+                                    })
+                            )
                             ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
                             ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? __('Already set by environment variable!') : null)
                             ->default(fn () => ! empty(config('proxy.m3u_resolver_url')) ? config('proxy.m3u_resolver_url') : '')
@@ -361,7 +364,7 @@ class ManageProxySettings extends BaseSettingsPage
                                     ->columnSpanFull()
                                     ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
                                     ->placeholder(__('e.g. 403, 404, 502, 503'))
-                                    ->helperText(__('HTTP response codes that should mark a playlist as temporarily unavailable. All channels from the affected playlist will be skipped during failover resolution.')),
+                                    ->helperText(__('Playlists that return these codes are temporarily skipped during failover.')),
 
                                 TextInput::make('failover_fail_conditions_timeout')
                                     ->label(__('Invalid timeout (minutes)'))
@@ -517,12 +520,11 @@ class ManageProxySettings extends BaseSettingsPage
                     ->columnSpanFull()
                     ->columns(2)
                     ->collapsible()
-                    ->afterHeader([TestProxyWebhooksAction::make()])
                     ->schema([
                         Toggle::make('proxy_track_watch_history')
                             ->label(__('Track watch history'))
                             ->live()
-                            ->helperText(__('Records each live channel, movie, and episode streamed through the proxy, with the Playlist Auth, player, and how long it was watched. Streams that don\'t go through the proxy aren\'t recorded.'))
+                            ->helperText(__('Records live channels, movies and episodes streamed through the proxy, with the Playlist Auth, player and watch time.'))
                             ->hintIcon(
                                 'heroicon-m-question-mark-circle',
                                 tooltip: __('Built from the proxy\'s webhooks, so they must reach M3U Editor. It can only be turned on once "Test webhooks" passes.')
@@ -539,6 +541,8 @@ class ManageProxySettings extends BaseSettingsPage
                                     $fail(__('Watch history needs the proxy\'s webhooks to reach M3U Editor. :reason', ['reason' => $result['message']]));
                                 }
                             }]),
+                        Actions::make([TestProxyWebhooksAction::make()])
+                            ->columnSpanFull(),
                         TextInput::make('proxy_watch_history_retention_days')
                             ->label(__('Keep history for'))
                             ->numeric()
@@ -574,7 +578,7 @@ class ManageProxySettings extends BaseSettingsPage
                                     ->openUrlInNewTab(false)
                             )
                             ->columnSpan(2)
-                            ->helperText(__('The default transcoding profile used by the in-app player for Live content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                            ->helperText(__('Used by the in-app player for Live content unless a channel has its own profile. Leave empty for no transcoding (some streams may not play).')),
                         Select::make('default_vod_stream_profile_id')
                             ->label(__('VOD and Series Transcoding Profile'))
                             ->searchable()
@@ -591,7 +595,7 @@ class ManageProxySettings extends BaseSettingsPage
                                     ->openUrlInNewTab(false)
                             )
                             ->columnSpan(2)
-                            ->helperText(__('The default transcoding profile used by the in-app player for VOD/Series content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                            ->helperText(__('Used by the in-app player for VOD and Series unless a channel has its own profile. Leave empty for no transcoding (some streams may not play).')),
                         TextInput::make('max_concurrent_floating_players')
                             ->label(__('Max Concurrent Players'))
                             ->hintIcon(

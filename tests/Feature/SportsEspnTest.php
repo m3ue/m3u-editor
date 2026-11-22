@@ -204,7 +204,7 @@ it('saves the sports settings and tests the typed API URL', function () {
             'sports_espn_enabled' => true,
             'sports_espn_api_url' => 'https://mirror.example.com/sports',
         ])
-        ->callAction(TestAction::make('test_sports_connection')->schemaComponent('sports_espn'))
+        ->callAction(TestAction::make('test_sports_connection')->schemaComponent())
         ->assertNotified(__('Connection Successful'))
         ->call('save')
         ->assertHasNoFormErrors();

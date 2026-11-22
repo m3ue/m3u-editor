@@ -639,7 +639,7 @@ it('saves the TheSportsDB settings and tests the typed key', function () {
 
     Livewire::test(ManageIntegrationSettings::class)
         ->fillForm(['sports_tsdb_enabled' => true, 'sports_tsdb_api_key' => TSDB_TEST_KEY])
-        ->callAction(TestAction::make('test_tsdb_connection')->schemaComponent('sports_tsdb'))
+        ->callAction(TestAction::make('test_tsdb_connection')->schemaComponent())
         ->assertNotified(__('Connection Successful'))
         ->call('save')
         ->assertHasNoFormErrors();

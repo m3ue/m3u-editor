@@ -59,7 +59,7 @@ class ManageCacheSettings extends BaseSettingsPage
                     ->columnSpanFull()
                     ->visible(fn (Get $get): bool => (bool) $get('enable_cache'))
                     ->description(fn (): HtmlString => new HtmlString(
-                        e(__('When running in Docker, cached files are written inside the container unless you mount a volume at the cache folder. Without it, every cached file is lost when the container is rebuilt or updated, and each entry has to be downloaded again. Add a volume like this to your docker-compose.yml:'))
+                        e(__('Mount a volume at the cache folder, or cached files are lost whenever the container is rebuilt. Add this to your docker-compose.yml:'))
                         .'<pre class="mt-2 overflow-x-auto rounded-lg bg-gray-950/5 p-3 font-mono text-xs dark:bg-white/5"><code>volumes:'."\n"
                         .'  - ./cache:'.e((string) config('filesystems.disks.cache.root')).'</code></pre>'
                     )),
@@ -68,9 +68,9 @@ class ManageCacheSettings extends BaseSettingsPage
                     ->color('info')
                     ->columnSpanFull()
                     ->visible(fn (Get $get): bool => (bool) $get('enable_cache'))
-                    ->description(__('Turn on "Use for caching" on a Radarr or Sonarr integration to send new titles there instead of downloading them from the provider. This applies to playlists that prefer media server sources. Those titles are managed in Radarr or Sonarr, and cache retention never removes them unless a Radarr integration has "Remove after leaving dynamic groups" on.')),
+                    ->description(__('Turn on "Use for caching" on a Radarr or Sonarr integration to cache new titles there instead, for playlists that prefer media server sources. Cache retention does not remove those titles.')),
                 Section::make(__('Cached Content'))
-                    ->description(__('Download VOD movies and series episodes to local storage with the "Cache Now" actions. Once a download completes, playback uses the local copy instead of the provider.'))
+                    ->description(__('Download movies and episodes with "Cache Now" so playback uses the local copy.'))
                     ->columnSpanFull()
                     ->columns(2)
                     ->schema([
@@ -78,13 +78,13 @@ class ManageCacheSettings extends BaseSettingsPage
                             ->label(__('Enable cache'))
                             ->inline(false)
                             ->live()
-                            ->helperText(__('Shows the "Cache Now" actions and serves completed downloads during playback. When off, nothing new is downloaded and playback always uses the provider. Existing cached files are kept.'))
+                            ->helperText(__('Shows the "Cache Now" actions and plays completed downloads. When off, playback uses the provider and existing files are kept.'))
                             ->default(false),
                         Select::make('cache_retention_mode')
                             ->label(__('Cache retention mode'))
                             ->options(self::cacheRetentionOptions())
                             ->default('automatic')
-                            ->helperText(__('"Automatic" deletes a cached file once its movie or episode is removed from the playlist. "Never expire" and "Manual" keep files until you delete them from the Cached Downloads page. Playlists can override this.')),
+                            ->helperText(__('"Automatic" deletes files when their content leaves the playlist. The other modes keep files until you delete them. Playlists can override this.')),
                         Toggle::make('default_share_cache_across_playlists')
                             ->label(__('Share cache across playlists by default'))
                             ->inline(false)
