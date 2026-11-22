@@ -104,7 +104,10 @@ class TimeshiftStreamController extends Controller
         $lines = preg_split('/\r?\n/', $playlist);
         $out = [];
         $segmentsSeen = 0;
-        $pendingExtinf = null;
+        // A segment's tags (EXTINF plus PROGRAM-DATE-TIME/DISCONTINUITY) are
+        // buffered until its URI line, so a kept segment keeps its EXTINF and
+        // a skipped one drops the whole block.
+        $pending = null;
         $firstKeptNumber = null;
 
         foreach ($lines as $line) {
@@ -115,30 +118,32 @@ class TimeshiftStreamController extends Controller
                 continue;
             }
             if (str_starts_with($line, '#EXTINF')) {
-                $pendingExtinf = $line;
+                $pending = [$line];
 
                 continue;
             }
             if (preg_match('/^live(\d+)\.ts$/', $line, $m)) {
                 $segmentsSeen++;
                 if ($segmentsSeen <= $skip) {
-                    $pendingExtinf = null;
+                    $pending = null;
 
                     continue;
                 }
                 if ($firstKeptNumber === null) {
                     $firstKeptNumber = (int) $m[1];
                 }
-                if ($pendingExtinf !== null) {
-                    $out[] = $pendingExtinf;
-                    $pendingExtinf = null;
+                if ($pending !== null) {
+                    array_push($out, ...$pending);
+                    $pending = null;
                 }
                 $out[] = $line;
 
                 continue;
             }
-            if ($pendingExtinf !== null) {
-                $pendingExtinf = null;
+            if ($pending !== null) {
+                $pending[] = $line;
+
+                continue;
             }
             $out[] = $line;
         }
