@@ -148,33 +148,35 @@
         },
         {
             "name": "ashallendesign/short-url",
-            "version": "v8.5.0",
+            "version": "v8.6.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/ash-jc-allen/short-url.git",
-                "reference": "5300f9667ed07a83eaa2d7f47cfd41f1e20f7e94"
+                "reference": "22f4df630f3bb47ada8ba608455afeac849f7fb7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ash-jc-allen/short-url/zipball/5300f9667ed07a83eaa2d7f47cfd41f1e20f7e94",
-                "reference": "5300f9667ed07a83eaa2d7f47cfd41f1e20f7e94",
+                "url": "https://api.github.com/repos/ash-jc-allen/short-url/zipball/22f4df630f3bb47ada8ba608455afeac849f7fb7",
+                "reference": "22f4df630f3bb47ada8ba608455afeac849f7fb7",
                 "shasum": ""
             },
             "require": {
-                "ashallendesign/laravel-config-validator": "^2.6.1",
+                "ashallendesign/laravel-config-validator": "^2.6.1 || ^3.0.0",
                 "hashids/hashids": "^4.0|^5.0",
-                "illuminate/container": "^10.0|^11.0|^12.0|^13.0",
-                "illuminate/database": "^10.0|^11.0|^12.0|^13.0",
+                "illuminate/container": "^11.0|^12.0|^13.0",
+                "illuminate/database": "^11.0|^12.0|^13.0",
                 "nesbot/carbon": "^2.0|^3.0",
                 "php": "^8.2",
                 "whichbrowser/parser": "^2.1"
             },
             "require-dev": {
-                "larastan/larastan": "^2.0|^3.0",
+                "friendsofphp/php-cs-fixer": "^3.88",
+                "larastan/larastan": "^3.0",
                 "mockery/mockery": "^1.0",
-                "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+                "orchestra/testbench": "^9.0|^10.0|^11.0",
                 "pestphp/pest-plugin-laravel": "^2.3|^3.0|^4.0",
-                "phpunit/phpunit": "^10.0|^11.0|^12.0"
+                "phpunit/phpunit": "^10.0|^11.0|^12.0",
+                "rector/rector": "^2.0"
             },
             "type": "library",
             "extra": {
@@ -213,7 +215,7 @@
             ],
             "support": {
                 "issues": "https://github.com/ash-jc-allen/short-url/issues",
-                "source": "https://github.com/ash-jc-allen/short-url/tree/v8.5.0"
+                "source": "https://github.com/ash-jc-allen/short-url/tree/v8.6.0"
             },
             "funding": [
                 {
@@ -221,7 +223,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-03-13T11:41:49+00:00"
+            "time": "2026-11-18T11:14:24+00:00",
+            "published-time": "2026-11-18T11:14:48+00:00"
         },
         {
             "name": "blade-ui-kit/blade-heroicons",
@@ -2966,20 +2969,20 @@
         },
         {
             "name": "halaxa/json-machine",
-            "version": "1.2.6",
+            "version": "1.2.7",
             "source": {
                 "type": "git",
                 "url": "https://github.com/halaxa/json-machine.git",
-                "reference": "8bf0b0ff6ff60ab480778eaa5ad7d505b442c2d4"
+                "reference": "2c53c1f1a028989afb43c5f413c9fedfe564eae4"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/halaxa/json-machine/zipball/8bf0b0ff6ff60ab480778eaa5ad7d505b442c2d4",
-                "reference": "8bf0b0ff6ff60ab480778eaa5ad7d505b442c2d4",
+                "url": "https://api.github.com/repos/halaxa/json-machine/zipball/2c53c1f1a028989afb43c5f413c9fedfe564eae4",
+                "reference": "2c53c1f1a028989afb43c5f413c9fedfe564eae4",
                 "shasum": ""
             },
             "require": {
-                "php": "7.2 - 8.5"
+                "php": "7.2 - 8.6"
             },
             "require-dev": {
                 "ext-json": "*",
@@ -3016,7 +3019,7 @@
             "description": "Efficient, easy-to-use and fast JSON pull parser",
             "support": {
                 "issues": "https://github.com/halaxa/json-machine/issues",
-                "source": "https://github.com/halaxa/json-machine/tree/1.2.6"
+                "source": "https://github.com/halaxa/json-machine/tree/1.2.7"
             },
             "funding": [
                 {
@@ -3024,7 +3027,8 @@
                     "type": "other"
                 }
             ],
-            "time": "2025-12-05T14:53:09+00:00"
+            "time": "2026-11-21T15:26:54+00:00",
+            "published-time": "2026-11-21T15:27:01+00:00"
         },
         {
             "name": "hashids/hashids",
@@ -3753,37 +3757,37 @@
         },
         {
             "name": "laravel/horizon",
-            "version": "v5.51.0",
+            "version": "v5.52.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/horizon.git",
-                "reference": "e168e56b97a4a4bb2b7481c1ad01b1be1e49963e"
+                "reference": "8ea23ed9a48a0c08962314761dbd91cdd57fee7e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/horizon/zipball/e168e56b97a4a4bb2b7481c1ad01b1be1e49963e",
-                "reference": "e168e56b97a4a4bb2b7481c1ad01b1be1e49963e",
+                "url": "https://api.github.com/repos/laravel/horizon/zipball/8ea23ed9a48a0c08962314761dbd91cdd57fee7e",
+                "reference": "8ea23ed9a48a0c08962314761dbd91cdd57fee7e",
                 "shasum": ""
             },
             "require": {
                 "ext-json": "*",
                 "ext-pcntl": "*",
                 "ext-posix": "*",
-                "illuminate/contracts": "^9.21|^10.0|^11.0|^12.0|^13.0",
-                "illuminate/queue": "^9.21|^10.0|^11.0|^12.0|^13.0",
-                "illuminate/support": "^9.21|^10.0|^11.0|^12.0|^13.0",
+                "illuminate/contracts": "^12.0|^13.0",
+                "illuminate/queue": "^12.0|^13.0",
+                "illuminate/support": "^12.0|^13.0",
                 "laravel/sentinel": "^1.0",
-                "nesbot/carbon": "^2.17|^3.0",
-                "php": "^8.0",
+                "nesbot/carbon": "^3.0",
+                "php": "^8.2",
                 "ramsey/uuid": "^4.0",
-                "symfony/console": "^6.0|^7.0|^8.0",
-                "symfony/error-handler": "^6.0|^7.0|^8.0",
+                "symfony/console": "^7.0|^8.0",
+                "symfony/error-handler": "^7.0|^8.0",
                 "symfony/polyfill-php83": "^1.28",
-                "symfony/process": "^6.0|^7.0|^8.0"
+                "symfony/process": "^7.4.5|^8.0.5"
             },
             "require-dev": {
                 "mockery/mockery": "^1.0",
-                "orchestra/testbench": "^7.56|^8.37|^9.16|^10.9|^11.0",
+                "orchestra/testbench": "^10.9|^11.0",
                 "phpstan/phpstan": "^1.10|^2.0",
                 "predis/predis": "^1.1|^2.0|^3.0"
             },
@@ -3827,9 +3831,10 @@
             ],
             "support": {
                 "issues": "https://github.com/laravel/horizon/issues",
-                "source": "https://github.com/laravel/horizon/tree/v5.51.0"
+                "source": "https://github.com/laravel/horizon/tree/v5.52.0"
             },
-            "time": "2026-11-02T15:26:17+00:00"
+            "time": "2026-11-16T15:32:25+00:00",
+            "published-time": "2026-11-17T15:16:42+00:00"
         },
         {
             "name": "laravel/prompts",
@@ -3891,25 +3896,25 @@
         },
         {
             "name": "laravel/reverb",
-            "version": "v1.13.0",
+            "version": "v1.14.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/reverb.git",
-                "reference": "94ccfe195094a0685b75c15d7eea62124f0d9dbc"
+                "reference": "0547bcc5f0dcc8331a1be4818bb9a8bbc94ec1d4"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/reverb/zipball/94ccfe195094a0685b75c15d7eea62124f0d9dbc",
-                "reference": "94ccfe195094a0685b75c15d7eea62124f0d9dbc",
+                "url": "https://api.github.com/repos/laravel/reverb/zipball/0547bcc5f0dcc8331a1be4818bb9a8bbc94ec1d4",
+                "reference": "0547bcc5f0dcc8331a1be4818bb9a8bbc94ec1d4",
                 "shasum": ""
             },
             "require": {
                 "clue/redis-react": "^2.6",
                 "guzzlehttp/psr7": "^2.6|^3.0",
-                "illuminate/console": "^10.47|^11.0|^12.0|^13.0",
-                "illuminate/contracts": "^10.47|^11.0|^12.0|^13.0",
-                "illuminate/http": "^10.47|^11.0|^12.0|^13.0",
-                "illuminate/support": "^10.47|^11.0|^12.0|^13.0",
+                "illuminate/console": "^12.0|^13.0",
+                "illuminate/contracts": "^12.0|^13.0",
+                "illuminate/http": "^12.0|^13.0",
+                "illuminate/support": "^12.0|^13.0",
                 "laravel/prompts": "^0.1.15|^0.2.0|^0.3.0",
                 "php": "^8.2",
                 "pusher/pusher-php-server": "^7.2",
@@ -3922,8 +3927,8 @@
             },
             "require-dev": {
                 "jasonmccreary/double": "^1.0",
-                "orchestra/testbench": "^8.36|^9.15|^10.8|^11.0",
-                "pestphp/pest": "^2.0|^3.0|^4.0",
+                "orchestra/testbench": "^10.8|^11.0",
+                "pestphp/pest": "^3.0|^4.0",
                 "phpstan/phpstan": "2.2.16",
                 "ratchet/pawl": "^0.4.1",
                 "react/async": "^4.2",
@@ -3965,9 +3970,10 @@
                 "websocket"
             ],
             "support": {
-                "source": "https://github.com/laravel/reverb/tree/v1.13.0"
+                "source": "https://github.com/laravel/reverb/tree/v1.14.0"
             },
-            "time": "2026-10-19T14:22:03+00:00"
+            "time": "2026-11-16T17:01:04+00:00",
+            "published-time": "2026-11-17T15:19:05+00:00"
         },
         {
             "name": "laravel/sanctum",
@@ -4292,35 +4298,35 @@
         },
         {
             "name": "lcobucci/jwt",
-            "version": "5.6.1",
+            "version": "5.7.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/lcobucci/jwt.git",
-                "reference": "482760068e5a55a9045feddb3e2fc3f878cbd577"
+                "reference": "d7e47accd18c44268e1dcf01eec19f24d6904862"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/lcobucci/jwt/zipball/482760068e5a55a9045feddb3e2fc3f878cbd577",
-                "reference": "482760068e5a55a9045feddb3e2fc3f878cbd577",
+                "url": "https://api.github.com/repos/lcobucci/jwt/zipball/d7e47accd18c44268e1dcf01eec19f24d6904862",
+                "reference": "d7e47accd18c44268e1dcf01eec19f24d6904862",
                 "shasum": ""
             },
             "require": {
                 "ext-openssl": "*",
                 "ext-sodium": "*",
-                "php": "~8.2.0 || ~8.3.0 || ~8.4.0 || ~8.5.0",
+                "php": "~8.4.0 || ~8.5.0 || ~8.6.0",
                 "psr/clock": "^1.0"
             },
             "require-dev": {
-                "infection/infection": "^0.29",
-                "lcobucci/clock": "^3.2",
-                "lcobucci/coding-standard": "^11.0",
-                "phpbench/phpbench": "^1.2",
-                "phpstan/extension-installer": "^1.2",
-                "phpstan/phpstan": "^1.10.7",
-                "phpstan/phpstan-deprecation-rules": "^1.1.3",
-                "phpstan/phpstan-phpunit": "^1.3.10",
-                "phpstan/phpstan-strict-rules": "^1.5.0",
-                "phpunit/phpunit": "^11.1"
+                "infection/infection": "^0.35",
+                "lcobucci/clock": "^3.7",
+                "lcobucci/coding-standard": "^12.1",
+                "phpbench/phpbench": "^1.7",
+                "phpstan/extension-installer": "^1.4.3",
+                "phpstan/phpstan": "^2.3",
+                "phpstan/phpstan-deprecation-rules": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.1",
+                "phpstan/phpstan-strict-rules": "^2.1",
+                "phpunit/phpunit": "^13.4"
             },
             "suggest": {
                 "lcobucci/clock": ">= 3.2"
@@ -4349,7 +4355,7 @@
             ],
             "support": {
                 "issues": "https://github.com/lcobucci/jwt/issues",
-                "source": "https://github.com/lcobucci/jwt/tree/5.6.1"
+                "source": "https://github.com/lcobucci/jwt/tree/5.7.0"
             },
             "funding": [
                 {
@@ -4361,7 +4367,8 @@
                     "type": "patreon"
                 }
             ],
-            "time": "2026-10-10T09:42:14+00:00"
+            "time": "2026-11-19T21:02:34+00:00",
+            "published-time": "2026-11-19T21:06:03+00:00"
         },
         {
             "name": "league/commonmark",
@@ -8159,12 +8166,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/shuvroroy/filament-spatie-laravel-backup.git",
-                "reference": "54497516e2bf3d3f908339c608145b2e47411499"
+                "reference": "213246951a69e876d7838339eb34bd929cab71aa"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/shuvroroy/filament-spatie-laravel-backup/zipball/54497516e2bf3d3f908339c608145b2e47411499",
-                "reference": "54497516e2bf3d3f908339c608145b2e47411499",
+                "url": "https://api.github.com/repos/shuvroroy/filament-spatie-laravel-backup/zipball/213246951a69e876d7838339eb34bd929cab71aa",
+                "reference": "213246951a69e876d7838339eb34bd929cab71aa",
                 "shasum": ""
             },
             "require": {
@@ -8229,7 +8236,8 @@
                     "type": "buy_me_a_coffee"
                 }
             ],
-            "time": "2026-11-08T14:53:02+00:00"
+            "time": "2026-11-22T14:52:58+00:00",
+            "published-time": "2026-11-22T14:53:03+00:00"
         },
         {
             "name": "socialiteproviders/manager",
@@ -8564,16 +8572,16 @@
         },
         {
             "name": "spatie/laravel-backup",
-            "version": "10.4.0",
+            "version": "10.5.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/spatie/laravel-backup.git",
-                "reference": "f5622c47d8aada2542c28a7612d832357d2e8979"
+                "reference": "bfec9d8a6d07ec11694b17c593ee2375b8a53245"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/spatie/laravel-backup/zipball/f5622c47d8aada2542c28a7612d832357d2e8979",
-                "reference": "f5622c47d8aada2542c28a7612d832357d2e8979",
+                "url": "https://api.github.com/repos/spatie/laravel-backup/zipball/bfec9d8a6d07ec11694b17c593ee2375b8a53245",
+                "reference": "bfec9d8a6d07ec11694b17c593ee2375b8a53245",
                 "shasum": ""
             },
             "require": {
@@ -8648,7 +8656,7 @@
             ],
             "support": {
                 "issues": "https://github.com/spatie/laravel-backup/issues",
-                "source": "https://github.com/spatie/laravel-backup/tree/10.4.0"
+                "source": "https://github.com/spatie/laravel-backup/tree/10.5.0"
             },
             "funding": [
                 {
@@ -8660,7 +8668,8 @@
                     "type": "other"
                 }
             ],
-            "time": "2026-11-06T11:04:53+00:00"
+            "time": "2026-11-18T16:20:46+00:00",
+            "published-time": "2026-11-18T16:21:06+00:00"
         },
         {
             "name": "spatie/laravel-discord-alerts",
@@ -16725,6 +16734,6 @@
     "platform": {
         "php": "^8.4"
     },
-    "platform-dev": [],
-    "plugin-api-version": "2.6.0"
+    "platform-dev": {},
+    "plugin-api-version": "2.11.0"
 }

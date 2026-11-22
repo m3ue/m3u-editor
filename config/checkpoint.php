@@ -103,6 +103,13 @@ return [
             // ── Well-known, widely-audited ecosystem packages ────────────────
             'league/flysystem',
             'vlucas/phpdotenv',
+            // 5.7.0 hardens signer/parser handling and deprecates LooseValidAt
+            // (tokens without "exp" never expire, CWE-613); diff reviewed in Vet
+            'lcobucci/jwt',
+            // 1.2.7 only changes docs and build files (CHANGELOG, Makefile, AGENTS.md); diff reviewed in Vet
+            'halaxa/json-machine',
+            // dev-main 2132469 only bumps postcss in the package's own package.json; diff reviewed in Vet
+            'shuvroroy/filament-spatie-laravel-backup',
             // ── Dev tooling — phpstan, rector, pest ──────────────────────────
             'phpstan/phpdoc-parser',
             'pestphp/pest',

@@ -10,8 +10,8 @@
             "hash": "tree-v2:180319f9ef68f4bc5ebd6baec11fb74252db25a89f214377ccdf796e815fb5a5"
         },
         "ashallendesign/short-url": {
-            "version": "v8.5.0",
-            "hash": "tree-v2:5286e996f1ec4a448668b65da11878d78af2adab71dbf4ca11191f25ea4042e3"
+            "version": "v8.6.0",
+            "hash": "tree-v2:8deba4b25eeb42d9994ef0a61db12ba75031b7dcac9953d234f63d70aef43784"
         },
         "blade-ui-kit/blade-heroicons": {
             "version": "2.7.0",
@@ -182,8 +182,8 @@
             "hash": "tree-v2:c5f332afdb641a8e51865f5fe4448a3c4c2d9ec959e76360003b5489525deaf6"
         },
         "halaxa/json-machine": {
-            "version": "1.2.6",
-            "hash": "tree-v2:7d7457e39d4c3a33986c791df5d9f872aa886a2916cda462f8fd7eab405df3b6"
+            "version": "1.2.7",
+            "hash": "tree-v2:5aaf0e345ff52ef551a8b3f104a8c6ba1b0c3caa5451bb77b4da9254d778700e"
         },
         "hashids/hashids": {
             "version": "5.0.2",
@@ -218,16 +218,16 @@
             "hash": "tree-v2:3d8c081207c628cfc345785b40ea0af302de612c3534bc43741d7d52b9fbfa27"
         },
         "laravel/horizon": {
-            "version": "v5.51.0",
-            "hash": "tree-v2:2237caf3a2d86f009625441f634a518c38293878b1c9b5ee69a1601ec3ca5ee7"
+            "version": "v5.52.0",
+            "hash": "tree-v2:4032340435f8719a943a730147a1b85943304b309d9d58962641bf92305daa17"
         },
         "laravel/prompts": {
             "version": "v0.3.27",
             "hash": "tree-v2:232313d19ffc3c32af1ed4f6657b57789ff194520d875263331f8ea0b2d306b1"
         },
         "laravel/reverb": {
-            "version": "v1.13.0",
-            "hash": "tree-v2:3bcc61cc314a1028b00cee753bc0979a166a52465d46abc70d9831eea261bfaa"
+            "version": "v1.14.0",
+            "hash": "tree-v2:960a8efdb73248a74444a2b44865b4ac59ea3fbbdf77a8ddf4f3095c62dfee21"
         },
         "laravel/sanctum": {
             "version": "v4.5.0",
@@ -250,8 +250,8 @@
             "hash": "tree-v2:01d0b6b0a3fd87bf29ea696024e76d3e48ad3af1c989b5e54589f4bf4081b657"
         },
         "lcobucci/jwt": {
-            "version": "5.6.1",
-            "hash": "tree-v2:17608d220d78f38cc0503d6ce6defe5319948eacf13dc8c13b36e3e30c74e6a1"
+            "version": "5.7.0",
+            "hash": "tree-v2:98c53b19343aa05c919bf1b833a2be31c09af378119d79db886f88f160211282"
         },
         "league/commonmark": {
             "version": "2.10.7",
@@ -471,7 +471,7 @@
         },
         "shuvroroy/filament-spatie-laravel-backup": {
             "version": "dev-main",
-            "hash": "tree-v2:6199d932f31145a18d137f8955050a65b528eb082014a4d2f7134c1e4b9cdd1e"
+            "hash": "tree-v2:99aee6d401226226a11f7e10685572c0aed2cffe55f44f83fe47887c08a3a05a"
         },
         "socialiteproviders/manager": {
             "version": "4.10.0",
@@ -494,8 +494,8 @@
             "hash": "tree-v2:6b59fc0127720a27d70dab84bf8d2f5e69278775c5d16ca342a68a0c4f427786"
         },
         "spatie/laravel-backup": {
-            "version": "10.4.0",
-            "hash": "tree-v2:a387ccfa59c7aa972f4f499866c2fca22760e3a0b03edb81d8460d176724b19e"
+            "version": "10.5.0",
+            "hash": "tree-v2:0ae7b0fd17499516a9c258b9068a17ec5fc4c8b9f5d7188704f05c06c27aec28"
         },
         "spatie/laravel-discord-alerts": {
             "version": "1.10.0",
