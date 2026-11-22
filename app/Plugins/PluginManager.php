@@ -25,6 +25,7 @@ use App\Plugins\Support\PluginExecutionContext;
 use App\Plugins\Support\PluginSelectOptionsContext;
 use App\Plugins\Support\PluginUninstallContext;
 use App\Plugins\Support\PluginValidationResult;
+use App\Support\SafeZipExtractor;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Eloquent\Model;
@@ -1986,23 +1987,6 @@ class PluginManager
         }
     }
 
-    private function guardArchiveEntryBudget(int &$fileCount, int &$byteCount, int $entrySize, string $archivePath): void
-    {
-        $maxFileCount = (int) config('plugins.archive_limits.max_file_count', 500);
-        $maxExtractedBytes = (int) config('plugins.archive_limits.max_extracted_bytes', 100 * 1024 * 1024);
-
-        $fileCount++;
-        $byteCount += max($entrySize, 0);
-
-        if ($maxFileCount > 0 && $fileCount > $maxFileCount) {
-            throw new RuntimeException("Plugin archive [{$archivePath}] contains too many files.");
-        }
-
-        if ($maxExtractedBytes > 0 && $byteCount > $maxExtractedBytes) {
-            throw new RuntimeException("Plugin archive [{$archivePath}] exceeds the maximum extracted payload size.");
-        }
-    }
-
     private function isPathWithinConfiguredDirectories(string $path, array $directories): bool
     {
         foreach ($directories as $directory) {
@@ -2182,7 +2166,7 @@ class PluginManager
             }
 
             try {
-                $this->extractZipArchiveSafely($zip, $extractRoot, $archivePath);
+                $this->pluginArchiveExtractor()->extract($zip, $extractRoot, $archivePath);
             } finally {
                 $zip->close();
             }
@@ -2212,71 +2196,31 @@ class PluginManager
         throw new RuntimeException('Plugin archives must use .zip, .tar, .tar.gz, or .tgz.');
     }
 
-    private function extractZipArchiveSafely(ZipArchive $zip, string $extractRoot, string $archivePath): void
+    private function pluginArchiveExtractor(): SafeZipExtractor
     {
-        $fileCount = 0;
-        $byteCount = 0;
-
-        for ($index = 0; $index < $zip->numFiles; $index++) {
-            $stat = $zip->statIndex($index);
-            if (! is_array($stat) || ! isset($stat['name'])) {
-                throw new RuntimeException("Plugin archive [{$archivePath}] contains an unreadable zip entry.");
-            }
-
-            $normalizedPath = $this->normalizeArchiveEntryPath((string) $stat['name'], $archivePath);
-
-            $operatingSystem = 0;
-            $attributes = 0;
-            if ($zip->getExternalAttributesIndex($index, $operatingSystem, $attributes)) {
-                $fileType = ($attributes >> 16) & 0xF000;
-                if ($fileType === 0xA000) {
-                    throw new RuntimeException("Plugin archive [{$archivePath}] contains a symlink entry [{$stat['name']}], which is not allowed.");
-                }
-            }
-
-            $destinationPath = $this->archiveDestinationPath($extractRoot, $normalizedPath);
-            if (str_ends_with((string) $stat['name'], '/')) {
-                File::ensureDirectoryExists($destinationPath);
-
-                continue;
-            }
-
-            $this->guardArchiveEntryBudget($fileCount, $byteCount, (int) ($stat['size'] ?? 0), $archivePath);
-
-            $stream = $zip->getStream((string) $stat['name']);
-            if ($stream === false) {
-                throw new RuntimeException("Plugin archive [{$archivePath}] contains an unreadable file entry [{$stat['name']}].");
-            }
-
-            File::ensureDirectoryExists(dirname($destinationPath));
-
-            $handle = fopen($destinationPath, 'wb');
-            if ($handle === false) {
-                fclose($stream);
-                throw new RuntimeException("Unable to write extracted plugin file [{$destinationPath}].");
-            }
-
-            stream_copy_to_stream($stream, $handle);
-            fclose($stream);
-            fclose($handle);
-        }
+        return new SafeZipExtractor(
+            archiveLabel: 'Plugin archive',
+            maxFileCount: (int) config('plugins.archive_limits.max_file_count', 500),
+            maxExtractedBytes: (int) config('plugins.archive_limits.max_extracted_bytes', 100 * 1024 * 1024),
+        );
     }
 
     private function extractPharArchiveSafely(PharData $phar, string $archiveToExtract, string $extractRoot, string $displayArchivePath): void
     {
         $fileCount = 0;
         $byteCount = 0;
+        $extractor = $this->pluginArchiveExtractor();
         $iterator = new \RecursiveIteratorIterator($phar, \RecursiveIteratorIterator::SELF_FIRST);
 
         foreach ($iterator as $entry) {
             $relativePath = $this->relativePharEntryPath((string) $entry->getPathname(), $archiveToExtract);
-            $normalizedPath = $this->normalizeArchiveEntryPath($relativePath, $displayArchivePath);
+            $normalizedPath = $extractor->normalizeEntryPath($relativePath, $displayArchivePath);
 
             if (method_exists($entry, 'isLink') && $entry->isLink()) {
                 throw new RuntimeException("Plugin archive [{$displayArchivePath}] contains a symlink entry [{$relativePath}], which is not allowed.");
             }
 
-            $destinationPath = $this->archiveDestinationPath($extractRoot, $normalizedPath);
+            $destinationPath = $extractor->destinationPath($extractRoot, $normalizedPath);
             if ($entry->isDir()) {
                 File::ensureDirectoryExists($destinationPath);
 
@@ -2287,7 +2231,7 @@ class PluginManager
                 throw new RuntimeException("Plugin archive [{$displayArchivePath}] contains an unsupported entry type [{$relativePath}].");
             }
 
-            $this->guardArchiveEntryBudget($fileCount, $byteCount, (int) $entry->getSize(), $displayArchivePath);
+            $extractor->guardEntryBudget($fileCount, $byteCount, (int) $entry->getSize(), $displayArchivePath);
 
             $contents = file_get_contents($entry->getPathname());
             if ($contents === false) {
@@ -2297,31 +2241,6 @@ class PluginManager
             File::ensureDirectoryExists(dirname($destinationPath));
             File::put($destinationPath, $contents);
         }
-    }
-
-    private function normalizeArchiveEntryPath(string $entryName, string $archivePath): string
-    {
-        $normalized = str_replace('\\', '/', trim($entryName));
-        $normalized = preg_replace('#/+#', '/', $normalized) ?? $normalized;
-        $normalized = preg_replace('#^(?:\./)+#', '', $normalized) ?? $normalized;
-        $trimmed = trim($normalized, '/');
-
-        if ($trimmed === '') {
-            throw new RuntimeException("Plugin archive [{$archivePath}] contains an empty entry name.");
-        }
-
-        if (str_contains($trimmed, "\0") || preg_match('/^[A-Za-z]:\//', $trimmed) === 1 || str_starts_with($normalized, '/')) {
-            throw new RuntimeException("Plugin archive [{$archivePath}] contains an absolute path entry [{$entryName}].");
-        }
-
-        $segments = explode('/', $trimmed);
-        foreach ($segments as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
-                throw new RuntimeException("Plugin archive [{$archivePath}] contains an unsafe path entry [{$entryName}].");
-            }
-        }
-
-        return implode('/', $segments);
     }
 
     private function relativePharEntryPath(string $entryPath, string $archiveToExtract): string
@@ -2335,11 +2254,6 @@ class PluginManager
         }
 
         return Str::after($normalizedEntryPath, $prefix);
-    }
-
-    private function archiveDestinationPath(string $extractRoot, string $normalizedPath): string
-    {
-        return rtrim($extractRoot, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $normalizedPath);
     }
 
     private function locateExtractedPluginRoot(string $extractRoot): string

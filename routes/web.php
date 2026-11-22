@@ -19,6 +19,7 @@ use App\Http\Controllers\EpgGenerateController;
 use App\Http\Controllers\GroupController;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\LogoRepositoryController;
+use App\Http\Controllers\M3uTvWebAppController;
 use App\Http\Controllers\MediaServerProxyController;
 use App\Http\Controllers\NetworkEpgController;
 use App\Http\Controllers\NetworkHlsController;
@@ -475,22 +476,13 @@ Route::middleware(['throttle:5,1,epg-sync'])->prefix('epg')->group(function () {
 });
 
 /*
- * Flutter TV web app entry point (aligned with the /m3u-proxy prefix).
- * Everything after /m3u-tv/ is a static file already served directly by
- * Herd/nginx (public/m3u-tv/*); only the bare entry path falls through to
- * the router, since Herd's static-file check requires an exact file match
- * and won't resolve a directory to its index.html.
- *
- * The COOP/COEP headers make the page cross-origin isolated, which lets
- * Flutter's skwasm renderer run multi-threaded (it falls back to a single
- * thread otherwise). `credentialless` rather than `require-corp` so
- * cross-origin posters and provider streams without CORP headers still load.
+ * M3U TV web app (aligned with the /m3u-proxy prefix), installed and updated
+ * from Settings > TV App independently of editor releases. See
+ * M3uTvWebAppController for its caching and cross-origin isolation headers.
  */
-Route::get('/m3u-tv', fn () => redirect('/m3u-tv/'));
-Route::get('/m3u-tv/', fn () => response()->file(public_path('m3u-tv/index.html'), [
-    'Cross-Origin-Opener-Policy' => 'same-origin',
-    'Cross-Origin-Embedder-Policy' => 'credentialless',
-]));
+Route::get('/m3u-tv/{path?}', M3uTvWebAppController::class)
+    ->where('path', '.*')
+    ->name('m3u-tv.web');
 
 /*
  * Xtream API endpoints at root

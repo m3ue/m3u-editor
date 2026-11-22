@@ -5,12 +5,14 @@ namespace App\Filament\Clusters\Settings\Pages;
 use App\Filament\Clusters\Devices\Pages\PairDevice;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Filament\Resources\TvDevices\TvDeviceResource;
+use App\Jobs\InstallM3uTvWebApp;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PushDeviceToken;
 use App\Notifications\Notification as AppNotification;
+use App\Services\M3uTvWebAppService;
 use App\Services\PushRelayService;
 use App\Settings\GeneralSettings;
 use BackedEnum;
@@ -22,12 +24,15 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Throwable;
 
 class ManageTvAppSettings extends BaseSettingsPage
 {
@@ -194,6 +199,8 @@ class ManageTvAppSettings extends BaseSettingsPage
                     ->warning()
                     ->description(__('Enhanced Xtream API output is disabled. Please enable that in the "General" settings tab to use the TV app.'))
                     ->hidden(fn (): bool => (bool) (app(GeneralSettings::class)->app_output_enabled ?? true)),
+                $this->webAppSection(),
+
                 Section::make(__('Push Notifications (Mobile)'))
                     ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed.'))
                     ->icon('heroicon-m-device-phone-mobile')
@@ -319,6 +326,105 @@ class ManageTvAppSettings extends BaseSettingsPage
                             ->reorderable()
                             ->columnSpanFull(),
                     ]),
+            ]);
+    }
+
+    /**
+     * The M3U TV web app served at /m3u-tv/: installed version, latest
+     * release with a web build, and install/update, rollback and remove.
+     */
+    private function webAppSection(): Section
+    {
+        $webApp = fn (): M3uTvWebAppService => app(M3uTvWebAppService::class);
+        $versionLabel = fn (?array $release): string => $release === null
+            ? __('Not installed')
+            : __(':version (build :build)', ['version' => $release['version'], 'build' => $release['build_number']]);
+
+        return Section::make(__('Web App'))
+            ->description(__('Play M3U TV in a browser at /m3u-tv/ on this server. The web app installs and updates from M3U TV releases, independently of M3U Editor updates.'))
+            ->icon('heroicon-m-globe-alt')
+            ->schema([
+                Grid::make()->columns(2)->schema([
+                    TextEntry::make('web_app_installed_version')
+                        ->label(__('Installed version'))
+                        ->state(fn (): string => $versionLabel($webApp()->installed())),
+                    TextEntry::make('web_app_latest_version')
+                        ->label(__('Latest release'))
+                        ->state(function () use ($webApp, $versionLabel): string {
+                            $latest = $webApp()->latestRelease();
+                            if ($latest === null) {
+                                return __('No release with a web build found');
+                            }
+
+                            return $latest['compatible']
+                                ? $versionLabel($latest)
+                                : __(':version (needs M3U Editor :editor or newer)', ['version' => $latest['version'], 'editor' => $latest['min_editor_version']]);
+                        }),
+                ]),
+                Actions::make([
+                    Action::make('open_web_app')
+                        ->label(__('Open'))
+                        ->color('gray')
+                        ->icon('heroicon-o-arrow-top-right-on-square')
+                        ->url(fn (): string => route('m3u-tv.web'))
+                        ->openUrlInNewTab()
+                        ->visible(fn (): bool => $webApp()->servingRoot() !== null),
+                    Action::make('install_web_app')
+                        ->label(fn (): string => $webApp()->installed() === null ? __('Install') : __('Update'))
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->visible(fn (): bool => $webApp()->updateAvailable())
+                        ->requiresConfirmation()
+                        ->modalDescription(fn (): string => __('Download and install M3U TV :version? It runs in the background and you will be notified when it finishes.', [
+                            'version' => $webApp()->latestRelease()['version'] ?? '',
+                        ]))
+                        ->action(function (): void {
+                            dispatch(new InstallM3uTvWebApp((int) auth()->id()));
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Installing the M3U TV web app'))
+                                ->body(__('You will be notified when it finishes.'))
+                                ->send();
+                        }),
+                    Action::make('check_web_app_updates')
+                        ->label(__('Check for updates'))
+                        ->color('gray')
+                        ->icon('heroicon-o-arrow-path')
+                        ->action(function () use ($webApp): void {
+                            $latest = $webApp()->latestRelease(refresh: true);
+
+                            Notification::make()
+                                ->title($latest === null ? __('No web app release found') : __('Latest web app release: :version', ['version' => $latest['version']]))
+                                ->color($latest === null ? 'warning' : 'success')
+                                ->send();
+                        }),
+                    Action::make('rollback_web_app')
+                        ->label(__('Roll back'))
+                        ->color('gray')
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->visible(fn (): bool => (bool) ($webApp()->installed()['has_previous'] ?? false))
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Switch back to the previously installed web app version?'))
+                        ->action(function () use ($webApp): void {
+                            try {
+                                $webApp()->rollback();
+                                Notification::make()->success()->title(__('Rolled back the M3U TV web app'))->send();
+                            } catch (Throwable $exception) {
+                                Notification::make()->danger()->title(__('Rollback failed'))->body($exception->getMessage())->send();
+                            }
+                        }),
+                    Action::make('remove_web_app')
+                        ->label(__('Remove'))
+                        ->color('danger')
+                        ->icon('heroicon-o-trash')
+                        ->visible(fn (): bool => $webApp()->installed() !== null)
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Remove the installed web app? /m3u-tv/ stops working until it is installed again.'))
+                        ->action(function () use ($webApp): void {
+                            $webApp()->remove();
+                            Notification::make()->success()->title(__('Removed the M3U TV web app'))->send();
+                        }),
+                ]),
             ]);
     }
 }
