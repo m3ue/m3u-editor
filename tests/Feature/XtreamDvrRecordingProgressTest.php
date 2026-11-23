@@ -140,3 +140,33 @@ it('stores dvr recording progress through playlist alias credentials', function 
     expect(ViewerWatchProgress::query()->where('content_type', 'dvr_recording')->sole()->stream_id)
         ->toBe($recording->id);
 });
+
+it('leaves dvr recordings out of the general recently watched list', function () {
+    $recording = makeDvrProgressRecording($this, $this->auth);
+    postDvrProgress('dvr-progress-user', 'dvr-progress-pass', $recording->id)->assertOk();
+
+    $this->getJson(route('xtream.api.player', [
+        'username' => 'dvr-progress-user',
+        'password' => 'dvr-progress-pass',
+        'action' => 'get_recently_watched',
+    ]))->assertOk()->assertExactJson([]);
+});
+
+it('returns dvr recording progress on request without channel metadata', function () {
+    $recording = makeDvrProgressRecording($this, $this->auth);
+    // A channel sharing the recording's id must not lend it a title.
+    Channel::query()->whereKey($this->channel->id)->update(['id' => $recording->id, 'title' => 'Unrelated Channel']);
+    postDvrProgress('dvr-progress-user', 'dvr-progress-pass', $recording->id)->assertOk();
+
+    $rows = $this->getJson(route('xtream.api.player', [
+        'username' => 'dvr-progress-user',
+        'password' => 'dvr-progress-pass',
+        'action' => 'get_recently_watched',
+        'type' => 'dvr_recording',
+    ]))->assertOk()->json();
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['stream_id'])->toBe($recording->id)
+        ->and($rows[0]['position_seconds'])->toBe(120)
+        ->and(json_encode($rows))->not->toContain('Unrelated Channel');
+});

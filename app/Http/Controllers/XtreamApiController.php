@@ -3636,7 +3636,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'Viewer not found'], 404);
         }
 
-        $type = $request->input('type'); // 'live', 'vod', 'episode', or null for all
+        $type = $request->input('type'); // 'live', 'vod', 'episode', 'dvr_recording', or null for all but DVR
         $limit = min((int) $request->input('limit', 20), 100);
 
         // Opt-in: clients that understand synthetic "up next" episode entries pass
@@ -3649,8 +3649,12 @@ class XtreamApiController extends Controller
             ->orderByDesc('last_watched_at')
             ->with(['channel', 'episode.series']);
 
-        if ($type && in_array($type, ['live', 'vod', 'episode'])) {
+        if (in_array($type, ['live', 'vod', 'episode', 'dvr_recording'], true)) {
             $query->where('content_type', $type);
+        } else {
+            // DVR recordings resume from the DVR screen. Their stream_id is a recording
+            // id, which clients that don't know the type would take for a VOD id.
+            $query->where('content_type', '!=', 'dvr_recording');
         }
 
         // Fetch a bounded candidate window larger than $limit, not just $limit rows:
@@ -3746,7 +3750,7 @@ class XtreamApiController extends Controller
                 $data['year'] = $progress->year;
                 $data['aio_item_id'] = $progress->aio_item_id;
                 $data['aio_integration_id'] = $progress->aio_integration_id;
-            } else {
+            } elseif ($progress->content_type !== 'dvr_recording') {
                 // live
                 $channel = $progress->channel;
 
