@@ -19,6 +19,7 @@
  *      DVR is disabled globally via config, even for the recording's owner.
  */
 
+use App\Enums\DvrRecordingStatus;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
@@ -27,6 +28,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -187,4 +189,48 @@ it('404s the HLS playlist endpoint when a guest credential requests a sibling cr
     ]));
 
     $response->assertNotFound();
+});
+
+it('keeps serving the HLS playlist while a recording is post-processing and the broadcast still exists', function () {
+    Http::fake(['*' => Http::response("#EXTM3U\n#EXTINF:6.0,\nlive000001.ts\n")]);
+
+    $recording = DvrRecording::factory()
+        ->recording()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'status' => DvrRecordingStatus::PostProcessing,
+            'playlist_auth_id' => $this->authA->id,
+            'proxy_network_id' => 'network-1',
+        ]);
+
+    $this->get(route('dvr.recording.hls.playlist', [
+        'username' => 'credential-a',
+        'password' => 'password-a',
+        'uuid' => $recording->uuid,
+    ]))
+        ->assertOk()
+        ->assertSee('/broadcast/network-1/segment/live000001.ts', false);
+});
+
+it('404s the HLS playlist once post-processing has cleaned up the broadcast', function () {
+    Http::fake();
+
+    $recording = DvrRecording::factory()
+        ->recording()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'status' => DvrRecordingStatus::PostProcessing,
+            'playlist_auth_id' => $this->authA->id,
+            'proxy_network_id' => null,
+        ]);
+
+    $this->get(route('dvr.recording.hls.playlist', [
+        'username' => 'credential-a',
+        'password' => 'password-a',
+        'uuid' => $recording->uuid,
+    ]))->assertNotFound();
+
+    Http::assertNothingSent();
 });

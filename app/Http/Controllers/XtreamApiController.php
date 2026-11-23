@@ -3557,17 +3557,10 @@ class XtreamApiController extends Controller
             }
         } else {
             // DVR playback resumes against the recording's own id; make sure it
-            // belongs to a DVR setting this credential may use.
-            if ($contentType === 'dvr_recording') {
-                $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
-                $owned = $dvrSettingIds !== []
-                    && DvrRecording::query()
-                        ->whereIn('dvr_setting_id', $dvrSettingIds)
-                        ->whereKey($streamId)
-                        ->exists();
-                if (! $owned) {
-                    return response()->json(['error' => 'Recording not found'], 404);
-                }
+            // is one this credential can list (same scope as get_dvr_recordings).
+            if ($contentType === 'dvr_recording'
+                && ! $this->canReachDvrRecording($playlist, $streamId, $this->resolvePlaylistAuth($authMethod, $username, $password))) {
+                return response()->json(['error' => 'Recording not found'], 404);
             }
 
             $progress = ViewerWatchProgress::updateOrCreate(
@@ -4785,6 +4778,24 @@ class XtreamApiController extends Controller
         return DvrAccessScope::settingIdsForPlaylist($playlist);
     }
 
+    /**
+     * Whether a recording is visible to this credential: on a DVR setting the
+     * (alias-resolved) playlist can use and, for a playlist_auth login, recorded
+     * under that login. Mirrors the get_dvr_recordings / get_dvr_recording scope.
+     */
+    private function canReachDvrRecording($playlist, int $recordingId, ?PlaylistAuth $playlistAuth): bool
+    {
+        $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
+        $dvrSettingIds = $dvrPlaylist ? $this->resolveDvrSettingIds($dvrPlaylist) : [];
+
+        return $dvrSettingIds !== []
+            && DvrRecording::query()
+                ->whereIn('dvr_setting_id', $dvrSettingIds)
+                ->whereKey($recordingId)
+                ->when($playlistAuth, fn ($query) => $query->where('playlist_auth_id', $playlistAuth->id))
+                ->exists();
+    }
+
     private function resolveDvrSettingForWrite($playlist, ?int $channelId = null): ?DvrSetting
     {
         return DvrAccessScope::settingForWriteOnPlaylist($playlist, $channelId);
@@ -5818,7 +5829,7 @@ class XtreamApiController extends Controller
         // Proxy segments survive until post-processing step 4 cleanup, so the
         // growing HLS window stays playable through post_processing (otherwise
         // clients hit a dead zone between stop and completed). Recording keeps
-        // the historical always-emit live_url behaviour; post_processing only
+        // the historical always-emit live_url behavior; post_processing only
         // emits it while a broadcast id is still present.
         $hasLivePlaylist = $isRecording
             || ($isPostProcessing && $recording->proxy_network_id !== null);

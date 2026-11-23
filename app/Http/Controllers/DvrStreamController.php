@@ -62,7 +62,7 @@ class DvrStreamController extends Controller
      */
     public function serveRecording(Request $request, DvrRecording $recording): Response|StreamedResponse|RedirectResponse
     {
-        // In-progress (and still-finalizing) recording — serve through the editor so
+        // In-progress (and still-finalizing) recording: serve through the editor so
         // segment URLs resolve correctly. The proxy's HLS playlist uses relative segment
         // filenames (live000001.ts) which the browser resolves relative to the playlist URL.
         // If we redirect to the proxy directly, segments resolve to
