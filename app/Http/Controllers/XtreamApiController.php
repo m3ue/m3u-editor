@@ -56,6 +56,7 @@ use App\Services\M3uProxyService;
 use App\Services\Sports\SportsChannelMatcher;
 use App\Services\Sports\SportsService;
 use App\Services\TmdbService;
+use App\Services\TimeshiftBufferService;
 use App\Services\TvClientConfigService;
 use App\Services\VodFileNameService;
 use App\Services\WatchHistory\WatchHistoryScrobbler;
@@ -2384,6 +2385,23 @@ class XtreamApiController extends Controller
                 'delete_dvr_series_rule' => $this->deleteDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
                 'search_epg_shows' => $this->searchEpgShows($request, $dvrPlaylist, $playlistAuth),
             };
+        } elseif ($action === 'timeshift_heartbeat') {
+            if (! config('timeshift.enabled', true)) {
+                return response()->json(['error' => 'Timeshift is not enabled'], 403);
+            }
+            $channel = Channel::find((int) $request->input('channel_id', 0));
+            if (! $channel) {
+                return response()->json(['error' => 'Channel not found'], 404);
+            }
+            $bufferId = TimeshiftBufferService::bufferIdFor($channel);
+            $service = app(TimeshiftBufferService::class);
+            $service->touch($bufferId);
+            $window = $service->playlistSeconds($bufferId);
+
+            return response()->json([
+                'success' => true,
+                'window_seconds' => $window,
+            ]);
         } elseif ($action === 'get_timeshift_config') {
             if (! config('timeshift.enabled', true)) {
                 return response()->json(['error' => 'Timeshift is not enabled'], 403);

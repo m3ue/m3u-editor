@@ -7,6 +7,7 @@ use App\Services\TimeshiftBufferService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -36,6 +37,13 @@ class TimeshiftStreamController extends Controller
         $playlistUrl = $this->proxyBroadcastPlaylistUrl($bufferId);
         $playlist = $this->fetchPlaylistWithStartupWait($playlistUrl);
         if ($playlist === null) {
+            Log::info('timeshift playlist response', [
+                'buffer_id' => $bufferId,
+                'segments' => 0,
+                'playlist_seconds' => 0,
+                'minimum_met' => false,
+                'startup_wait_seconds' => (int) config('timeshift.startup_wait_seconds', 2),
+            ]);
             // Buffer still warming (FFmpeg hasn't written a playlist yet).
             // Serve a valid, empty live playlist so HLS clients poll for the
             // first segments instead of failing the cold .m3u8 open.
@@ -43,9 +51,22 @@ class TimeshiftStreamController extends Controller
         }
 
         $playlist = $this->trimToProgrammeStart($playlist, $bufferId);
+        $segmentTotals = [];
+        preg_match_all('/^#EXTINF:([0-9.]+)/m', $playlist, $segmentTotals);
+        Log::info('timeshift playlist response', [
+            'buffer_id' => $bufferId,
+            'segments' => count($segmentTotals[1]),
+            'playlist_seconds' => array_sum(array_map('floatval', $segmentTotals[1])),
+            'minimum_met' => $this->hasMinimumSegments($playlist),
+            'startup_wait_seconds' => (int) config('timeshift.startup_wait_seconds', 2),
+        ]);
 
-        $segmentBase = $this->publicSegmentBase($bufferId);
-        $playlist = preg_replace('/^(live\d+\.ts)\r?$/m', $segmentBase.'$1', $playlist);
+        $playlist = preg_replace_callback('/^(live\d+\.ts)\r?$/m', function (array $matches) use ($bufferId): string {
+            return URL::signedRoute('timeshift.live.segment.signed', [
+                'uuid' => $bufferId,
+                'segment' => preg_replace('/\.ts$/', '', $matches[1]),
+            ], absolute: false);
+        }, $playlist);
 
         return response($playlist, 200, [
             'Content-Type' => 'application/vnd.apple.mpegurl',
@@ -63,14 +84,28 @@ class TimeshiftStreamController extends Controller
      */
     public function signedSegment(Request $request, string $uuid, string $segment): Response
     {
-        if (! preg_match('/^live\d+\.ts$/', $segment)) {
+        if (! preg_match('/^live\d+$/', $segment)) {
             abort(404, 'Segment not found');
         }
         $this->timeshift->touch($uuid);
 
-        $target = $this->publicSegmentBase($uuid).$segment;
+        $target = $this->proxyApiBase()
+            .'/broadcast/'.rawurlencode($uuid)
+            .'/segment/'.rawurlencode($segment.'.ts');
 
-        return redirect()->to($target, 302, ['Cache-Control' => 'public, max-age=60'], false);
+        $response = Http::withHeaders(array_filter(['X-API-Token' => $this->proxyToken()]))
+            ->timeout(15)
+            ->get($target);
+
+        if (! $response->successful()) {
+            abort($response->status());
+        }
+
+        return response($response->body(), 200, [
+            'Content-Type' => 'video/mp2t',
+            'Cache-Control' => 'public, max-age=60',
+            'Access-Control-Allow-Origin' => '*',
+        ]);
     }
 
     /**
@@ -189,7 +224,7 @@ class TimeshiftStreamController extends Controller
 
     protected function proxyBroadcastPlaylistUrl(string $bufferId): string
     {
-        return rtrim($this->proxyApiBase(), '/').'/broadcast/'.rawurlencode($bufferId).'/live.m3u8';
+        return rtrim($this->proxyApiBase(), '/').'/broadcast/'.rawurlencode($bufferId).'/segment/live.m3u8';
     }
 
     protected function fetchPlaylistWithStartupWait(string $playlistUrl): ?string

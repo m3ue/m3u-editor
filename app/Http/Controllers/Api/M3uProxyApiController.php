@@ -76,6 +76,16 @@ class M3uProxyApiController extends Controller
         // channel-level profile still wins since it is pinned to make that specific
         // stream work (e.g. resolver profiles). 'none' means explicit direct proxy.
         $playlistProfile = $channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile;
+
+        // Wrapper playlists (Merged/Custom/Alias) carry no stream profile of their
+        // own. Fall back to the channel's source playlist profile so transcoding
+        // selected on the provider playlist still applies through a wrapper.
+        if ($playlistProfile === null && $channel->playlist instanceof Playlist) {
+            $playlistProfile = $channel->is_vod
+                ? $channel->playlist->vodStreamProfile
+                : $channel->playlist->streamProfile;
+        }
+
         $clientProfile = $request->attributes->get('client_stream_profile');
         if ($clientProfile === 'none') {
             $playlistProfile = null;
@@ -138,12 +148,20 @@ class M3uProxyApiController extends Controller
 
         // Start the recorder only AFTER the viewer's player has connected.
         // m3u-proxy makes the first client on a pooled stream the "primary
-        // reader" and fans its bytes out to subscribers. Kicking off here
-        // (before the redirect is even returned) made the buffer's FFmpeg the
-        // primary, so the player rode FFmpeg's real-time read/disk pace and
-        // re-buffered periodically. Running after the response — and after a
-        // short settle — leaves the player primary and the recorder a
-        // subscriber, still on the single shared upstream connection.
+        // reader" and fans its bytes out to subscribers. Kicking off before
+        // the redirect is returned makes the buffer's FFmpeg the primary, so
+        // the player rides FFmpeg's real-time read/disk pace and re-buffers
+        // periodically. Flushing the response first - then settling - leaves
+        // the player primary and the recorder a subscriber on the same shared
+        // upstream connection. The kickoff must never restart an existing
+        // broadcast: start on a non-running broadcast does stopAndDelete +
+        // restart, invalidating segments the player is mid-fetch on (Source
+        // error -> stream reset).
+        \Illuminate\Support\Facades\Log::info('timeshift kickoff', [
+            'buffer_id' => TimeshiftBufferService::bufferIdFor($channel),
+            'channel_id' => $channel->id,
+            'mode' => 'plain_live_delayed',
+        ]);
         app()->terminating(function () use ($buffer, $channel, $playlistUuid, $url): void {
             // Flush the redirect to the client first, so it can connect (and
             // become the proxy's primary reader) while we wait here.

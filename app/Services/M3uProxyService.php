@@ -3496,6 +3496,23 @@ class M3uProxyService
     }
 
     /**
+     * Internal URL for an HLS-format stream (profile format hls/m3u8).
+     * /stream/{id} only carries MPEG-TS; reading it as input hangs or fails
+     * for HLS streams, which is what the timeshift broadcast reader needs.
+     */
+    public function getHlsStreamUrl(string $streamId): string
+    {
+        $baseUrl = $this->getApiBaseUrl();
+
+        // The API base URL may be configured without a scheme (e.g. "m3u-proxy:38085").
+        if (! str_starts_with($baseUrl, 'http://') && ! str_starts_with($baseUrl, 'https://')) {
+            $baseUrl = 'http://'.$baseUrl;
+        }
+
+        return $baseUrl.'/hls/'.$streamId.'/playlist.m3u8';
+    }
+
+    /**
      * Get m3u-proxy server information including configuration and capabilities
      *
      * @return array Array with 'success', 'info', and optional 'error' keys

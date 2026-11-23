@@ -18,10 +18,19 @@ return [
     // Concurrent rolling buffers (one per channel). 0 = unlimited.
     'max_concurrent' => (int) env('TIMESHIFT_MAX_CONCURRENT', 20),
 
-    // Stop a buffer after this many seconds with no playlist fetches.
-    // Touches also happen on plain-live ?timeshift=1 views so the buffer
-    // stays warm while the viewer is still on the un-seekable pipe.
-    'idle_stop_seconds' => (int) env('TIMESHIFT_IDLE_STOP_SECONDS', 120),
+    // REAP QUICKLY ONCE NOBODY IS WATCHING.
+    //
+    // Each timeshift buffer holds an upstream/provider stream open, so
+    // buffers that outlive the viewer exhaust the connection/tuner pool.
+    // A long idle here is therefore actively harmful.
+    //
+    // The buffer is kept alive WHILE watched by the client's 2s
+    // `timeshift_heartbeat` (which also reports window_seconds) plus normal
+    // playlist fetches - not by a generous timeout. So: no viewer => no
+    // touches => reap here. Viewer paused => heartbeat keeps touching => never
+    // reaped. 10s tolerates ~5 missed heartbeats (network hiccup) while still
+    // freeing the stream within seconds of the player closing.
+    'idle_stop_seconds' => (int) env('TIMESHIFT_IDLE_STOP_SECONDS', 10),
 
     // Serve real HLS for .m3u8 timeshift requests even while the buffer is
     // still warming (the playlist controller waits briefly for the first
@@ -40,4 +49,8 @@ return [
 
     // Remux-only (stream copy) by default; set true to normalize live TS.
     'transcode' => filter_var(env('TIMESHIFT_TRANSCODE', false), FILTER_VALIDATE_BOOLEAN),
+    // Only used when 'transcode' is true. ffmpeg scale value, e.g. '-2:480';
+    // video_bitrate in kbps (the proxy appends 'k').
+    'video_resolution' => env('TIMESHIFT_VIDEO_RESOLUTION'),
+    'video_bitrate' => env('TIMESHIFT_VIDEO_BITRATE'),
 ];

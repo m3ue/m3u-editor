@@ -275,6 +275,26 @@ class XtreamStreamController extends Controller
             // until the viewer rewinds. Riding the live edge of a 2 s-segment
             // HLS window re-buffers at every segment boundary.
             $forcePlain = $request->input('timeshift_plain') === '1';
+            // Only for timeshift-opted requests: a plain live open (timeshift
+            // disabled, or a client without the feature) logs nothing.
+            if ($request->has('timeshift') || $request->has('timeshift_plain') || $request->has('timeshift_hls')) {
+                Log::info('timeshift live request', [
+                    'stream_id' => $streamId,
+                    'format' => $format,
+                    'query_keys' => array_keys($request->query->all()),
+                    'timeshift' => $request->input('timeshift'),
+                    'timeshift_hls' => $request->input('timeshift_hls'),
+                    'timeshift_plain' => $request->input('timeshift_plain'),
+                    'player' => $request->input('player'),
+                    'profile' => $request->input('profile'),
+                    'channel_profile_id' => $channel->stream_profile_id,
+                    'playlist_profile_id' => $playlist?->stream_profile_id,
+                    'channel_id' => $channel->id,
+                    'playlist_uuid' => $playlist?->uuid,
+                    'wants_timeshift' => $wantsTimeshift,
+                    'force_plain' => $forcePlain,
+                ]);
+            }
             if ($wantsTimeshift && ! $forcePlain) {
                 $playbackUrl = app(TimeshiftBufferService::class)
                     ->resolvePlaybackUrl($channel, $playlist->uuid);
@@ -337,11 +357,6 @@ class XtreamStreamController extends Controller
                     'uuid' => $playlist->uuid,
                 ]);
 
-                // HLS-first cold timeshift is only for clients that cannot play
-                // the raw MPEG-TS plain-live fallback (AVPlayer/hls.js). Those
-                // opt in with timeshift_hls=1. Android/desktop/mpv clients keep
-                // the smooth plain-live-first path and switch to the HLS window
-                // on rewind (when they're behind the edge, so it never stalls).
                 if (
                     $wantsTimeshift
                     && $wantsHls
@@ -349,10 +364,33 @@ class XtreamStreamController extends Controller
                     && $request->input('timeshift_hls') === '1'
                     && $proxyResponse instanceof RedirectResponse
                 ) {
+                    $bufferService = app(TimeshiftBufferService::class);
                     $bufferId = TimeshiftBufferService::bufferIdFor($channel);
+                    $deadline = microtime(true) + 4.0;
+
+                    do {
+                        if ($bufferService->isReady($bufferId)) {
+                            return Redirect::to(
+                                $bufferService->signedPlaylistUrl($bufferId)
+                            )->setPrivate()->setMaxAge(10);
+                        }
+                        usleep(100000);
+                    } while (microtime(true) < $deadline);
+
+                    // A cold/failed buffer must never hand a .m3u8 request a
+                    // raw TS proxy stream: ExoPlayer reports "Input does not
+                    // start with #EXTM3U" and renders black before retrying.
+                    // The signed playlist controller serves a valid empty live
+                    // playlist while the first segments are still warming.
+                    Log::info('timeshift hls cold fallback', [
+                        'buffer_id' => $bufferId,
+                        'channel_id' => $channel->id,
+                        'stream_id' => $streamId,
+                        'wait_seconds' => 4,
+                    ]);
 
                     return Redirect::to(
-                        app(TimeshiftBufferService::class)->signedPlaylistUrl($bufferId)
+                        $bufferService->signedPlaylistUrl($bufferId)
                     )->setPrivate()->setMaxAge(10);
                 }
 

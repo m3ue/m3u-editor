@@ -72,6 +72,53 @@ class TimeshiftBufferService
     }
 
     /**
+     * Rewindable window length in seconds, read from the proxy broadcast
+     * playlist. 0 when the buffer is cold or has been reaped.
+     *
+     * Briefly cached so the 2s heartbeat does not hammer the proxy. The client
+     * uses this to show the REAL buffer length from the first frame of a
+     * channel open - previously it seeded a wall-clock placeholder from 0 and
+     * then jumped once the backend reported the true window.
+     */
+    public function playlistSeconds(string $bufferId): int
+    {
+        $key = 'timeshift_buffer:window:'.$bufferId;
+        $cached = Cache::get($key);
+        if ($cached !== null && is_numeric($cached)) {
+            return (int) $cached;
+        }
+
+        $playlist = $this->fetchPlaylistOnce($bufferId);
+        $seconds = 0;
+        $segments = 0;
+        if ($playlist !== null) {
+            $extinf = [];
+            preg_match_all('/^#EXTINF:([0-9.]+)/m', $playlist, $extinf);
+            $segments = count($extinf[1] ?? []);
+            $seconds = (int) round(array_sum(array_map('floatval', $extinf[1] ?? [])));
+        }
+        Cache::put($key, $seconds, 3);
+
+        // Log only the diagnosable states: a fetch failure or a 0 window
+        // (cold start, or reaped while watched - two different causes, same
+        // user symptom "seek bar resets"). A healthy growing window logs
+        // nothing: the 2s heartbeat would otherwise write a line every beat
+        // for every viewer.
+        if ($playlist === null || $seconds === 0) {
+            Log::info('timeshift window probe', [
+                'buffer_id' => $bufferId,
+                'source' => 'playlist',
+                'fetch_ok' => $playlist !== null,
+                'segments' => $segments,
+                'seconds' => $seconds,
+                'head' => $playlist === null ? null : substr($playlist, 0, 60),
+            ]);
+        }
+
+        return $seconds;
+    }
+
+    /**
      * Redirect target for a timeshift-enabled live request.
      *
      * Returns null to mean "play plain live for now" (cold buffer, feature off,
@@ -275,7 +322,7 @@ class TimeshiftBufferService
             return [];
         }
 
-        $idle = max(30, (int) config('timeshift.idle_stop_seconds', 120));
+        $idle = max(10, (int) config('timeshift.idle_stop_seconds', 10));
         $reaped = [];
         $broadcasts = $this->listTimeshiftBroadcasts();
         if ($broadcasts === null) {
@@ -292,13 +339,46 @@ class TimeshiftBufferService
             if ($age < $idle) {
                 continue;
             }
+            // Captured before the cache keys below are dropped.
+            $ageForLog = $last === null ? null : $age;
+            $channelId = Cache::get(self::CHANNEL_PREFIX.$id);
             if ($this->stopAndDelete($id)) {
                 Cache::forget(self::touchKey($id));
                 Cache::forget(self::STARTED_PREFIX.$id);
                 Cache::forget(self::CHANNEL_PREFIX.$id);
                 Cache::forget(self::READY_PREFIX.$id);
                 $reaped[] = $id;
+
+                // Why it died: never touched (buffer started, no viewer yet)
+                // vs idle while a viewer was away. Both are correct, but they
+                // look identical to the user as "seek bar resets to 0".
+                Log::info('timeshift reaped', [
+                    'buffer_id' => $id,
+                    'channel_id' => $channelId,
+                    'idle_seconds' => $idle,
+                    'last_touch' => $last === null ? 'never' : date('c', $last),
+                    'last_touch_age_seconds' => $ageForLog,
+                    'reaped_total' => count($reaped),
+                ]);
+            } else {
+                Log::warning('timeshift reap FAILED', [
+                    'buffer_id' => $id,
+                    'channel_id' => $channelId,
+                    'idle_seconds' => $idle,
+                    'last_touch_age_seconds' => $ageForLog,
+                ]);
             }
+        }
+
+        // Idle-cadence noise: with a 5s schedule this line would otherwise
+        // write forever even with zero broadcasts. Only successful/failed
+        // reaps are worth a line (both logged above).
+        if (count($reaped) > 0) {
+            Log::info('timeshift reaper run', [
+                'scanned' => count($broadcasts),
+                'reaped' => count($reaped),
+                'idle_seconds' => $idle,
+            ]);
         }
 
         return $reaped;
@@ -311,11 +391,19 @@ class TimeshiftBufferService
     protected function internalStreamUrl(string $playerStreamUrl): ?string
     {
         if (preg_match('#/stream/([^/?]+)#', $playerStreamUrl, $m)) {
-            return $this->proxy->getStreamProxyUrl($m[1]);
+            $out = $this->proxy->getStreamProxyUrl($m[1]);
+            Log::info('timeshift kickoff-url branch=stream in='.$this->safeUrl($playerStreamUrl).' out='.$this->safeUrl($out));
+
+            return $out;
         }
         if (preg_match('#/hls/([^/?]+)/#', $playerStreamUrl, $m)) {
-            return $this->proxy->getStreamProxyUrl($m[1]);
+            $out = $this->proxy->getHlsStreamUrl($m[1]);
+            Log::info('timeshift kickoff-url branch=hls in='.$this->safeUrl($playerStreamUrl).' out='.$this->safeUrl($out));
+
+            return $out;
         }
+
+        Log::info('timeshift kickoff-url branch=none in='.$this->safeUrl($playerStreamUrl));
 
         // Not a proxy URL (shouldn't happen when timeshift forces the proxy
         // path) — refuse rather than open a second provider connection.
@@ -324,6 +412,20 @@ class TimeshiftBufferService
         ]);
 
         return null;
+    }
+
+    /**
+     * URL without query string for logging (trace params may carry the
+     * account username; never log it).
+     */
+    protected function safeUrl(string $url): string
+    {
+        $p = parse_url($url);
+        if ($p === false || ! isset($p['host'])) {
+            return substr($url, 0, 120);
+        }
+
+        return ($p['scheme'] ?? 'http').'://'.$p['host'].(isset($p['port']) ? ':'.$p['port'] : '').($p['path'] ?? '');
     }
 
     /**
@@ -442,12 +544,28 @@ class TimeshiftBufferService
     protected function startBroadcast(Channel $channel, string $bufferId, string $playlistUuid, string $streamUrl): bool
     {
         $segment = max(1, (int) config('timeshift.segment_seconds', 2));
+
+        // Cold-state probe: exactly what the broadcast reader will GET at this
+        // moment. Only for /hls/ URLs - /stream/ is the known-good TS path and
+        // a GET there would block until bytes flow.
+        if (str_contains($streamUrl, '/hls/')) {
+            try {
+                $probeResponse = Http::timeout(5)->get($streamUrl);
+                $probeBody = preg_replace('/\s+/', ' ', (string) $probeResponse->body());
+                Log::info('timeshift kickoff-probe status='.$probeResponse->status().' ctype='.$probeResponse->header('Content-Type').' body='.substr($probeBody, 0, 140));
+            } catch (\Throwable $probeError) {
+                Log::info('timeshift kickoff-probe error='.substr($probeError->getMessage(), 0, 140));
+            }
+        }
+
         $payload = [
             'stream_url' => $streamUrl,
             'duration_seconds' => 0,
             'hls_list_size' => self::hlsListSize(),
             'segment_duration' => $segment,
             'transcode' => (bool) config('timeshift.transcode', false),
+            'video_resolution' => config('timeshift.video_resolution') ?: null,
+            'video_bitrate' => config('timeshift.video_bitrate') ?: null,
             'output_dir' => config('proxy.broadcast_temp_dir'),
             'metadata' => [
                 'type' => 'timeshift',
