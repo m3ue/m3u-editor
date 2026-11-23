@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DvrRecordingStatus;
 use App\Http\Controllers\Concerns\StreamLocalFile;
 use App\Models\DvrRecording;
 use App\Models\PlaylistAuth;
@@ -62,13 +61,15 @@ class DvrStreamController extends Controller
      */
     public function serveRecording(Request $request, DvrRecording $recording): Response|StreamedResponse|RedirectResponse
     {
-        // In-progress recording — serve through the editor so segment URLs resolve correctly.
-        // The proxy's HLS playlist uses relative segment filenames (live000001.ts) which the
-        // browser resolves relative to the playlist URL. If we redirect to the proxy directly,
-        // segments resolve to /broadcast/{uuid}/live000001.ts instead of
-        // /broadcast/{uuid}/segment/live000001.ts. Proxying through the editor lets us rewrite
-        // segment URLs to the correct editor route.
-        if ($recording->status === DvrRecordingStatus::Recording && $recording->proxy_network_id) {
+        // In-progress (and still-finalizing) recording: serve through the editor so
+        // segment URLs resolve correctly. The proxy's HLS playlist uses relative segment
+        // filenames (live000001.ts) which the browser resolves relative to the playlist URL.
+        // If we redirect to the proxy directly, segments resolve to
+        // /broadcast/{uuid}/live000001.ts instead of /broadcast/{uuid}/segment/live000001.ts.
+        // Proxying through the editor lets us rewrite segment URLs to the correct editor route.
+        // Post-processing keeps the same playlist until DvrPostProcessor step 4 deletes the
+        // broadcast, so clients are not left with a dead URL between stop and completed.
+        if ($recording->servesLivePlaylist()) {
             return $this->serveLivePlaylist($request, $recording);
         }
 
@@ -186,8 +187,7 @@ class DvrStreamController extends Controller
         $recording = DvrRecording::where('uuid', $uuid)
             ->where('user_id', $user->id)
             ->when($isGuestCredential, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
-            ->where('status', DvrRecordingStatus::Recording)
-            ->whereNotNull('proxy_network_id')
+            ->servingLivePlaylist()
             ->first();
 
         if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, $playlistAuth, $isGuestCredential)) {
@@ -211,8 +211,7 @@ class DvrStreamController extends Controller
     public function signedHlsPlaylist(Request $request, string $uuid): Response
     {
         $recording = DvrRecording::where('uuid', $uuid)
-            ->where('status', DvrRecordingStatus::Recording)
-            ->whereNotNull('proxy_network_id')
+            ->servingLivePlaylist()
             ->first();
 
         if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, null, false)) {

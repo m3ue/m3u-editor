@@ -27,6 +27,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -314,6 +315,24 @@ it('streams a completed recording file with a query-string token', function () {
 
     $response->assertOk()->assertHeader('Accept-Ranges', 'bytes');
     expect($response->streamedContent())->toHaveLength(1024);
+});
+
+it('advertises and serves the live HLS playlist while a recording is post-processing', function () {
+    Http::fake(['*' => Http::response("#EXTM3U\n#EXTINF:6.0,\nlive000001.ts\n")]);
+    $recording = makeDispatcharrDvrRecording([
+        'status' => DvrRecordingStatus::PostProcessing,
+        'proxy_network_id' => 'network-1',
+    ], 'recording');
+    $hlsPath = "/recordings/{$recording->id}/hls/index.m3u8";
+
+    $this->getJson('/recordings/', dispatcharrDvrApiHeaders())
+        ->assertOk()
+        ->assertJsonPath('0.custom_properties.status', 'recording')
+        ->assertJsonPath('0.custom_properties.file_url', $hlsPath);
+
+    $this->get($hlsPath, dispatcharrDvrApiHeaders())
+        ->assertOk()
+        ->assertSee('/broadcast/network-1/segment/live000001.ts', false);
 });
 
 it('404s when a token touches another user\'s recording', function () {

@@ -452,6 +452,27 @@ class DvrRecording extends Model
     }
 
     /**
+     * Recordings whose growing HLS window the proxy still serves: recording, or
+     * post-processing until DvrPostProcessorService step 4 deletes the broadcast
+     * and clears proxy_network_id.
+     */
+    public function scopeServingLivePlaylist(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
+            ->whereNotNull('proxy_network_id');
+    }
+
+    /**
+     * Instance form of scopeServingLivePlaylist().
+     */
+    public function servesLivePlaylist(): bool
+    {
+        return $this->proxy_network_id !== null
+            && in_array($this->status, [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing], true);
+    }
+
+    /**
      * The rows that represent finished library storage: completed recordings with a
      * file, each file counted once.
      *
