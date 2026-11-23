@@ -157,7 +157,7 @@ class M3uProxyApiController extends Controller
         // broadcast: start on a non-running broadcast does stopAndDelete +
         // restart, invalidating segments the player is mid-fetch on (Source
         // error -> stream reset).
-        \Illuminate\Support\Facades\Log::info('timeshift kickoff', [
+        Log::info('timeshift kickoff', [
             'buffer_id' => TimeshiftBufferService::bufferIdFor($channel),
             'channel_id' => $channel->id,
             'mode' => 'plain_live_delayed',

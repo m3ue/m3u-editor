@@ -44,6 +44,7 @@ class TimeshiftStreamController extends Controller
                 'minimum_met' => false,
                 'startup_wait_seconds' => (int) config('timeshift.startup_wait_seconds', 2),
             ]);
+
             // Buffer still warming (FFmpeg hasn't written a playlist yet).
             // Serve a valid, empty live playlist so HLS clients poll for the
             // first segments instead of failing the cold .m3u8 open.
