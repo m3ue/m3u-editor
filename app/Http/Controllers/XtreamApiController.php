@@ -5824,15 +5824,11 @@ class XtreamApiController extends Controller
     private function formatDvrRecording(DvrRecording $recording, string $username, string $password, bool $full = false): array
     {
         $isRecording = $recording->status === DvrRecordingStatus::Recording;
-        $isPostProcessing = $recording->status === DvrRecordingStatus::PostProcessing;
         $isCompleted = $recording->status === DvrRecordingStatus::Completed;
-        // Proxy segments survive until post-processing step 4 cleanup, so the
-        // growing HLS window stays playable through post_processing (otherwise
-        // clients hit a dead zone between stop and completed). Recording keeps
-        // the historical always-emit live_url behavior; post_processing only
-        // emits it while a broadcast id is still present.
-        $hasLivePlaylist = $isRecording
-            || ($isPostProcessing && $recording->proxy_network_id !== null);
+        // Recording keeps the historical always-emit live_url behavior; past
+        // that, the window stays playable through post_processing until the
+        // proxy broadcast is cleaned up (no dead zone between stop and completed).
+        $hasLivePlaylist = $isRecording || $recording->servesLivePlaylist();
 
         $format = $isCompleted
             ? ($recording->dvrSetting?->dvr_output_format ?? 'mp4')

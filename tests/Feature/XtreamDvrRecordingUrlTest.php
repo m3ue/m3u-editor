@@ -133,7 +133,8 @@ it('keeps live_url available during post_processing while the proxy broadcast st
 
     $item = xtreamDvrUrlRecordingsResponse($this)[0];
 
-    expect($item['status'])->toBe('post_processing')
+    expect($item['id'])->toBe($recording->id)
+        ->and($item['status'])->toBe('post_processing')
         ->and($item['live_url'])->toBe("http://192.168.1.50:36400/dvr/dvr-user/dvr-pass/{$recording->uuid}/live.m3u8")
         ->and($item['stream_url'])->toBeNull()
         ->and($item['elapsed_seconds'])->toBeGreaterThanOrEqual(299);

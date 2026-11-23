@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DvrRecordingStatus;
 use App\Http\Controllers\Concerns\StreamLocalFile;
 use App\Models\DvrRecording;
 use App\Models\PlaylistAuth;
@@ -70,7 +69,7 @@ class DvrStreamController extends Controller
         // Proxying through the editor lets us rewrite segment URLs to the correct editor route.
         // Post-processing keeps the same playlist until DvrPostProcessor step 4 deletes the
         // broadcast, so clients are not left with a dead URL between stop and completed.
-        if ($this->hasLivePlaylist($recording)) {
+        if ($recording->servesLivePlaylist()) {
             return $this->serveLivePlaylist($request, $recording);
         }
 
@@ -188,8 +187,7 @@ class DvrStreamController extends Controller
         $recording = DvrRecording::where('uuid', $uuid)
             ->where('user_id', $user->id)
             ->when($isGuestCredential, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
-            ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
-            ->whereNotNull('proxy_network_id')
+            ->servingLivePlaylist()
             ->first();
 
         if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, $playlistAuth, $isGuestCredential)) {
@@ -213,8 +211,7 @@ class DvrStreamController extends Controller
     public function signedHlsPlaylist(Request $request, string $uuid): Response
     {
         $recording = DvrRecording::where('uuid', $uuid)
-            ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
-            ->whereNotNull('proxy_network_id')
+            ->servingLivePlaylist()
             ->first();
 
         if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, null, false)) {
@@ -302,16 +299,6 @@ class DvrStreamController extends Controller
         }
 
         return response()->json($segments);
-    }
-
-    /**
-     * Growing HLS window still served by the proxy (recording or post-processing
-     * before broadcast cleanup).
-     */
-    private function hasLivePlaylist(DvrRecording $recording): bool
-    {
-        return $recording->proxy_network_id !== null
-            && in_array($recording->status, [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing], true);
     }
 
     /**
