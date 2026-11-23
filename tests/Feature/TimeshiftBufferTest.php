@@ -127,8 +127,10 @@ it('serves a signed timeshift playlist route', function () {
 
     $response->assertOk();
     expect($response->getContent())->toContain('live000001.ts');
-    // Segments rewritten to absolute public proxy URLs.
-    expect($response->getContent())->toContain('/broadcast/ts-test-channel/segment/live000001.ts');
+    // Segments rewritten to signed editor routes; the proxy's /broadcast
+    // URLs are internal and must never be exposed to players.
+    expect($response->getContent())->toContain('/timeshift-live/signed/ts-test-channel/live000001.ts');
+    expect($response->getContent())->toContain('signature=');
 });
 
 it('rejects an unsigned timeshift playlist URL', function () {
