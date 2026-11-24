@@ -915,7 +915,7 @@ class EmbyJellyfinService implements MediaServer
     {
         try {
             $params = [
-                'Fields' => 'Path,MediaSources,Overview,RunTimeTicks',
+                'Fields' => 'Path,MediaSources,Overview,RunTimeTicks,DateCreated,ProviderIds',
             ];
 
             if ($seasonId) {

@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Episode;
+
 /**
  * Guards TMDB enrichment (written by FetchTmdbIds / AppliesTmdbSelection) against
  * provider metadata refreshes, which replace a VOD channel's `info` / a series'
@@ -131,6 +133,49 @@ class TmdbEnrichment
         }
 
         return $incoming;
+    }
+
+    /**
+     * Merge a media server sync's episode attributes over a TMDB-matched episode (tmdb_id
+     * column set). Those are never looked up again, so anything the sync wiped would stay
+     * gone: TMDB stills and the rating that came with a vote_count keep their stored value,
+     * everything else the server owns, with blanks filled from what is stored. Artwork is
+     * recognized by its TMDB URL, so a server image URL is always refreshed.
+     *
+     * @param  array<string, mixed>  $incoming
+     * @return array<string, mixed>
+     */
+    public static function preserveEpisodeOnMediaServerSync(Episode $episode, array $incoming): array
+    {
+        if ($episode->tmdb_id === null) {
+            return $incoming;
+        }
+
+        $existingInfo = self::toArray($episode->info);
+        $info = LocalMetadata::fillBlanks($existingInfo, $incoming['info']);
+
+        // Only TMDB sends a vote_count, so its presence marks the rating as TMDB's.
+        if (isset($existingInfo['vote_count']) && ! blank($existingInfo['rating'] ?? null)) {
+            $info['rating'] = $existingInfo['rating'];
+        }
+
+        if (self::isTmdbImage($existingInfo['movie_image'] ?? null)) {
+            $info['movie_image'] = $existingInfo['movie_image'];
+        }
+
+        $incoming['info'] = $info;
+        $incoming['plot'] = blank($incoming['plot']) ? $episode->plot : $incoming['plot'];
+
+        if (blank($incoming['cover']) || self::isTmdbImage($episode->cover)) {
+            $incoming['cover'] = $episode->cover;
+        }
+
+        return $incoming;
+    }
+
+    private static function isTmdbImage(mixed $url): bool
+    {
+        return is_string($url) && str_starts_with($url, 'https://image.tmdb.org/');
     }
 
     /**

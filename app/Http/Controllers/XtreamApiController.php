@@ -67,6 +67,7 @@ use App\Support\ChannelNumber;
 use App\Support\DvrLibraryFallback;
 use App\Support\EpgProgrammeArtwork;
 use App\Support\EpisodeNumberParser;
+use App\Support\ReleaseDate;
 use App\Support\SeriesKey;
 use App\Support\TmdbRating;
 use Carbon\Carbon;
@@ -948,7 +949,7 @@ class XtreamApiController extends Controller
                         $channelCategoryId = XtreamCategoryService::channelStreamCategoryId($channel);
                     }
 
-                    $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
+                    $tmdb = $channel->getTmdbId() ?? 0;
                     $vodChannelNo = ChannelNumber::resolve(
                         $channel->channel,
                         $channel->channel_minor,
@@ -1149,7 +1150,7 @@ class XtreamApiController extends Controller
                         'cast' => $seriesItem->cast ?? '',
                         'director' => $seriesItem->director ?? '',
                         'genre' => $seriesItem->genre ?? '',
-                        'releaseDate' => $seriesItem->release_date ?? '',
+                        'releaseDate' => ReleaseDate::normalize($seriesItem->release_date) ?? '',
                         'last_modified' => (string) ($lastModified),
                         'rating' => (string) TmdbRating::suppressIfLowVotes(
                             $seriesItem->rating ?? 0,
@@ -1302,7 +1303,7 @@ class XtreamApiController extends Controller
                 'cast' => $seriesItem->cast ?? '',
                 'director' => $seriesItem->director ?? '',
                 'genre' => $seriesItem->genre ?? '',
-                'releaseDate' => $seriesItem->release_date ?? '',
+                'releaseDate' => ReleaseDate::normalize($seriesItem->release_date) ?? '',
                 'last_modified' => (string) $lastModified,
                 'rating' => (string) TmdbRating::suppressIfLowVotes(
                     $seriesItem->rating ?? 0,
@@ -1399,6 +1400,7 @@ class XtreamApiController extends Controller
                         $orderedEpisodes = $season->episodes->sortBy('episode_num');
                         foreach ($orderedEpisodes as $episode) {
                             $containerExtension = $episode->container_extension ?? 'mp4';
+                            $movieImage = null;
                             if ($episode->info['movie_image'] ?? false) {
                                 $movieImage = $playlist->enable_logo_proxy
                                     ? $this->proxyImageUrl($episode->info['movie_image'], ImageProfile::Poster)
@@ -1428,17 +1430,21 @@ class XtreamApiController extends Controller
                                 );
                             }
 
+                            if (array_key_exists('release_date', $episodeInfo)) {
+                                $episodeInfo['release_date'] = ReleaseDate::normalize($episodeInfo['release_date']);
+                            }
+
                             $seasonEpisodes[] = [
                                 'id' => (string) $episode->id,
                                 'episode_num' => $episode->episode_num,
                                 'title' => $episode->title ?? "Episode {$episode->episode_num}",
                                 'container_extension' => $containerExtension,
                                 'info' => array_merge($episodeInfo, [
-                                    'movie_image' => $movieImage ?? null,
-                                    'cover_big' => $coverBig ?? null,
+                                    'movie_image' => $movieImage,
+                                    'cover_big' => $coverBig ?? $movieImage,
                                     'plot' => $episode->plot ?? null,
                                 ]),
-                                'added' => $episode->added,
+                                'added' => (string) (($episode->added ?? $episode->created_at)?->timestamp ?? time()),
                                 'season' => $episode->season,
                                 'custom_sid' => $episode->custom_sid ?? '',
                                 'stream_id' => $episode->id,
@@ -1849,7 +1855,7 @@ class XtreamApiController extends Controller
                 'o_name' => $info['o_name'] ?? $channel->name,
                 'cover_big' => $cover,
                 'movie_image' => $movieImage,
-                'release_date' => $info['release_date'] ?? $channel->year,
+                'release_date' => ReleaseDate::normalize($info['release_date'] ?? null) ?? $channel->year,
                 'episode_run_time' => $info['episode_run_time'] ?? 0,
                 'youtube_trailer' => $info['youtube_trailer'] ?? null,
                 'director' => $info['director'] ?? '',
@@ -1878,7 +1884,7 @@ class XtreamApiController extends Controller
                     $info['rating'] ?? $channel->rating ?? '',
                     $info['vote_count'] ?? null
                 ),
-                'releasedate' => $info['releasedate'] ?? $channel->year,
+                'releasedate' => ReleaseDate::normalize($info['releasedate'] ?? $info['release_date'] ?? null) ?? $channel->year,
                 'subtitles' => $info['subtitles'] ?? [],
             ];
 

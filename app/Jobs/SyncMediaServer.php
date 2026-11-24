@@ -15,6 +15,7 @@ use App\Models\Series;
 use App\Services\LocalMediaService;
 use App\Services\MediaServerService;
 use App\Services\TmdbService;
+use App\Support\ReleaseDate;
 use App\Support\TmdbEnrichment;
 use Carbon\Carbon;
 use Exception;
@@ -471,7 +472,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'o_name' => $movie['OriginalTitle'] ?? $movie['Name'],
             'cover_big' => $imageUrl,
             'movie_image' => $imageUrl,
-            'release_date' => $movie['PremiereDate'] ?? null,
+            'release_date' => ReleaseDate::normalize($movie['PremiereDate'] ?? null),
             'plot' => $movie['Overview'] ?? '',
             'description' => $movie['Overview'] ?? '',
             'director' => implode(', ', $directors),
@@ -814,7 +815,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'cover' => ($isNewSeries || ! empty($syncCover)) ? $syncCover : $series->cover,
             'plot' => ($isNewSeries || ! empty($syncPlot)) ? $syncPlot : $series->plot,
             'genre' => $hasTmdbGenre ? $series->genre : implode(', ', $genres),
-            'release_date' => $seriesData['PremiereDate'] ?? $seriesData['ProductionYear'] ?? null,
+            'release_date' => ReleaseDate::normalize($seriesData['PremiereDate'] ?? null) ?? $seriesData['ProductionYear'] ?? null,
             'cast' => ($isNewSeries || ! empty($syncCast)) ? $syncCast : $series->cast,
             'director' => ($isNewSeries || ! empty($syncDirector)) ? $syncDirector : $series->director,
             'rating' => $communityRating,
@@ -920,50 +921,57 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
 
         // Extract external IDs
         $providerIds = $episodeData['ProviderIds'] ?? [];
-        $tmdbId = $providerIds['Tmdb'] ?? null;
+        $tmdbId = (int) ($providerIds['Tmdb'] ?? 0) ?: null;
         $tvdbId = $providerIds['Tvdb'] ?? null;
         $imdbId = $providerIds['Imdb'] ?? null;
 
         // Extract rating
         $rating = $episodeData['CommunityRating'] ?? null;
 
-        Episode::updateOrCreate(
-            [
-                'playlist_id' => $playlist->id,
-                'series_id' => $series->id,
-                'source_episode_id' => crc32("media-server-{$integration->id}-{$episodeId}"),
-            ],
-            [
-                'title' => $episodeData['Name'] ?? 'Episode '.($episodeData['IndexNumber'] ?? '?'),
-                'user_id' => $playlist->user_id,
-                'series_id' => $series->id,
-                'season_id' => $season->id,
-                'episode_num' => $episodeData['IndexNumber'] ?? null,
+        // Unix timestamp string, the same format Xtream providers send
+        $addedAt = $this->parseDateCreated($episodeData['DateCreated'] ?? null);
+
+        $episode = Episode::firstOrNew([
+            'playlist_id' => $playlist->id,
+            'series_id' => $series->id,
+            'source_episode_id' => crc32("media-server-{$integration->id}-{$episodeId}"),
+        ]);
+
+        $episode->fill(TmdbEnrichment::preserveEpisodeOnMediaServerSync($episode, [
+            'title' => $episodeData['Name'] ?? 'Episode '.($episodeData['IndexNumber'] ?? '?'),
+            'user_id' => $playlist->user_id,
+            'series_id' => $series->id,
+            'season_id' => $season->id,
+            'episode_num' => $episodeData['IndexNumber'] ?? null,
+            'season' => $season->season_number,
+            'url' => $streamUrl,
+            'container_extension' => $container,
+            'import_batch_no' => $this->batchNo,
+            'enabled' => true,
+            'plot' => $episodeData['Overview'] ?? null,
+            'cover' => $imageUrl,
+            // Never wipe a known date when the server stops sending one
+            ...($addedAt ? ['added' => (string) $addedAt->timestamp] : []),
+            'info' => [
+                'media_server_id' => $episodeId,
+                'media_server_type' => $integration->type,
+                'duration_secs' => $runtimeSeconds ?: null,
+                'duration' => $runtimeSeconds > 0 ? gmdate('H:i:s', $runtimeSeconds) : null,
+                'movie_image' => $imageUrl,
+                'cover_big' => $imageUrl,
+                'release_date' => ReleaseDate::normalize($episodeData['PremiereDate'] ?? null),
+                'rating' => $rating,
+                'bitrate' => $bitrate,
                 'season' => $season->season_number,
-                'url' => $streamUrl,
-                'container_extension' => $container,
-                'import_batch_no' => $this->batchNo,
-                'enabled' => true,
-                'plot' => $episodeData['Overview'] ?? null,
-                'cover' => $imageUrl,
-                'info' => [
-                    'media_server_id' => $episodeId,
-                    'media_server_type' => $integration->type,
-                    'duration_secs' => $runtimeSeconds ?: null,
-                    'duration' => $runtimeSeconds > 0 ? gmdate('H:i:s', $runtimeSeconds) : null,
-                    'movie_image' => $imageUrl,
-                    'cover_big' => $imageUrl,
-                    'release_date' => $episodeData['PremiereDate'] ?? null,
-                    'rating' => $rating,
-                    'bitrate' => $bitrate,
-                    'season' => $season->season_number,
-                    'tmdb_id' => $tmdbId,
-                    'tvdb_id' => $tvdbId,
-                    'imdb_id' => $imdbId,
-                    'official_rating' => $episodeData['OfficialRating'] ?? null,
-                ],
-            ]
-        );
+                // The server's id lives in info only: a null tmdb_id column is what tells
+                // FetchTmdbIds an episode still needs its TMDB lookup. Once TMDB has
+                // matched the episode, its id wins over the server's.
+                'tmdb_id' => $episode->tmdb_id ?? $tmdbId,
+                'tvdb_id' => $tvdbId,
+                'imdb_id' => $imdbId,
+                'official_rating' => $episodeData['OfficialRating'] ?? null,
+            ],
+        ]))->save();
     }
 
     /**
