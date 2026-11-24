@@ -178,3 +178,15 @@ it('never exposes a group the requesting user is not permitted to see, even if s
         ->not->toContain('DVR')
         ->not->toContain('Proxy');
 });
+
+it('keeps every sidebar group collapsible, with only tools collapsed by default', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    $builder = app(AdminNavigationMenuBuilder::class)->build(new NavigationBuilder, defaultPanelSettings());
+    $groups = collect($builder->getNavigation())->filter(fn ($group) => filled($group->getLabel()));
+
+    expect($groups->count())->toBeGreaterThan(1)
+        ->and($groups->every(fn ($group) => $group->isCollapsible()))->toBeTrue()
+        ->and($groups->filter(fn ($group) => $group->isCollapsed())->map->getLabel()->values()->all())
+        ->toBe([__('Tools')]);
+});

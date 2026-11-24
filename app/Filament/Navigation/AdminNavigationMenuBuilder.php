@@ -50,6 +50,8 @@ class AdminNavigationMenuBuilder
             $groups[] = NavigationGroup::make($groupDef['label'])
                 ->icon($groupDef['icon'])
                 ->collapsed($groupDef['collapsed'] ?? false)
+                // After collapsed(), which also passes its condition to collapsible().
+                ->collapsible()
                 ->items($items);
         }
 
