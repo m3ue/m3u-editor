@@ -787,7 +787,11 @@ class ProfileService
             ];
         }
 
-        return static::testCredentials($xtreamConfig);
+        return static::testCredentials(
+            $xtreamConfig,
+            $profile->playlist?->user_agent,
+            $profile->playlist?->disable_ssl_verification,
+        );
     }
 
     /**
@@ -797,8 +801,10 @@ class ProfileService
      * useful for the "Test Profile" action in the UI.
      *
      * @param  array  $xtreamConfig  Array with 'url', 'username', 'password' keys
+     * @param  string|null  $userAgent  User agent of the playlist the credentials belong to
+     * @param  bool|null  $disableSslVerification  SSL setting of the playlist the credentials belong to
      */
-    public static function testCredentials(array $xtreamConfig): array
+    public static function testCredentials(array $xtreamConfig, ?string $userAgent = null, ?bool $disableSslVerification = null): array
     {
         try {
             if (empty($xtreamConfig['url']) || empty($xtreamConfig['username']) || empty($xtreamConfig['password'])) {
@@ -808,14 +814,8 @@ class ProfileService
                 ];
             }
 
-            $xtream = XtreamService::make(xtream_config: $xtreamConfig);
-
-            if (! $xtream) {
-                return [
-                    'valid' => false,
-                    'error' => 'Failed to connect to provider',
-                ];
-            }
+            $xtream = XtreamService::make(xtream_config: $xtreamConfig)
+                ->withRequestSettings($userAgent, $disableSslVerification);
 
             $userInfo = $xtream->userInfo(timeout: 5);
 
@@ -866,7 +866,7 @@ class ProfileService
             'password' => $config['password'] ?? '',
         ];
 
-        $testResult = static::testCredentials($xtreamConfig);
+        $testResult = static::testCredentials($xtreamConfig, $playlist->user_agent, $playlist->disable_ssl_verification);
         $maxStreams = $testResult['valid'] ? $testResult['max_connections'] : 1;
 
         $profile = PlaylistProfile::create([

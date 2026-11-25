@@ -604,7 +604,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                                     'url' => $url,
                                                                     'username' => $username,
                                                                     'password' => $password,
-                                                                ]);
+                                                                ])->withRequestSettings(
+                                                                    $get('../../user_agent'),
+                                                                    Playlist::find($get('../../playlist_id'))?->disable_ssl_verification,
+                                                                );
 
                                                                 $result = $xtream->userInfo(timeout: 10);
 

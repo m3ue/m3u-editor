@@ -1436,18 +1436,18 @@ class SeriesResource extends Resource implements CopilotResource
                             if (! $playlist) {
                                 return [];
                             }
-                            $xtreamConfig = Playlist::find($playlist)->xtream_config ?? [];
+                            $sourcePlaylist = Playlist::find($playlist);
+                            $xtreamConfig = $sourcePlaylist?->xtream_config ?? [];
                             $xtremeUrl = $xtreamConfig['url'] ?? '';
                             $xtreamUser = $xtreamConfig['username'] ?? '';
                             $xtreamPass = $xtreamConfig['password'] ?? '';
                             $cacheKey = 'xtream_series_categories_'.md5($xtremeUrl.$xtreamUser.$xtreamPass);
-                            $cachedCategories = Cache::remember($cacheKey, 60 * 1, function () use ($xtremeUrl, $xtreamUser, $xtreamPass) {
-                                $service = new XtreamService;
-                                $xtream = $service->init(xtream_config: [
+                            $cachedCategories = Cache::remember($cacheKey, 60 * 1, function () use ($xtremeUrl, $xtreamUser, $xtreamPass, $sourcePlaylist) {
+                                $xtream = XtreamService::make(xtream_config: [
                                     'url' => $xtremeUrl,
                                     'username' => $xtreamUser,
                                     'password' => $xtreamPass,
-                                ]);
+                                ])->withRequestSettings($sourcePlaylist?->user_agent, $sourcePlaylist?->disable_ssl_verification);
                                 $userInfo = $xtream->authenticate();
                                 if (! ($userInfo['auth'] ?? false)) {
                                     return [];
@@ -1527,17 +1527,18 @@ class SeriesResource extends Resource implements CopilotResource
                             if (! $playlist) {
                                 return [];
                             }
-                            $xtreamConfig = Playlist::find($playlist)->xtream_config ?? [];
+                            $sourcePlaylist = Playlist::find($playlist);
+                            $xtreamConfig = $sourcePlaylist?->xtream_config ?? [];
                             $xtremeUrl = $xtreamConfig['url'] ?? '';
                             $xtreamUser = $xtreamConfig['username'] ?? '';
                             $xtreamPass = $xtreamConfig['password'] ?? '';
                             $cacheKey = 'xtream_category_series'.md5($xtremeUrl.$xtreamUser.$xtreamPass.$category);
-                            $cachedCategories = Cache::remember($cacheKey, 60 * 1, function () use ($xtremeUrl, $xtreamUser, $xtreamPass, $category) {
+                            $cachedCategories = Cache::remember($cacheKey, 60 * 1, function () use ($xtremeUrl, $xtreamUser, $xtreamPass, $category, $sourcePlaylist) {
                                 $xtream = XtreamService::make(xtream_config: [
                                     'url' => $xtremeUrl,
                                     'username' => $xtreamUser,
                                     'password' => $xtreamPass,
-                                ]);
+                                ])->withRequestSettings($sourcePlaylist?->user_agent, $sourcePlaylist?->disable_ssl_verification);
                                 $userInfo = $xtream->authenticate();
                                 if (! ($userInfo['auth'] ?? false)) {
                                     return [];

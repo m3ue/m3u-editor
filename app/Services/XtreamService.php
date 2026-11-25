@@ -21,6 +21,11 @@ class XtreamService
      */
     protected const RATE_LIMIT_COOLDOWN_SECONDS = 900;
 
+    /**
+     * User agent sent when neither the caller nor the playlist provides one.
+     */
+    public const DEFAULT_USER_AGENT = 'VLC/3.0.21 LibVLC/3.0.21';
+
     protected string $server;
 
     protected string $user;
@@ -32,6 +37,10 @@ class XtreamService
     protected ?Playlist $playlist;
 
     protected ?array $xtream_config;
+
+    protected ?string $userAgent = null;
+
+    protected ?bool $disableSslVerification = null;
 
     /**
      * @var string[] Alternative server URLs for failover.
@@ -104,6 +113,20 @@ class XtreamService
         return $this;
     }
 
+    /**
+     * Set the request settings explicitly, for callers that only have raw
+     * credentials (unsaved forms, aliases) and must not pass a playlist, since
+     * that would also enable its URL failover. Null or empty values fall back
+     * to the playlist, then to the defaults.
+     */
+    public function withRequestSettings(?string $userAgent, ?bool $disableSslVerification = null): self
+    {
+        $this->userAgent = $userAgent;
+        $this->disableSslVerification = $disableSslVerification;
+
+        return $this;
+    }
+
     protected function call(string $url, int $timeout = 60 * 15)
     {
         if (! ($this->playlist || $this->xtream_config)) {
@@ -116,8 +139,8 @@ class XtreamService
             throw new XtreamRateLimitedException($retryAt);
         }
 
-        $user_agent = $this->playlist?->user_agent ?? 'VLC/3.0.21 LibVLC/3.0.21';
-        $verify = ! ($this->playlist?->disable_ssl_verification ?? false);
+        $user_agent = $this->userAgent ?: $this->playlist?->user_agent ?: self::DEFAULT_USER_AGENT;
+        $verify = ! ($this->disableSslVerification ?? $this->playlist?->disable_ssl_verification ?? false);
 
         // Try the primary URL first
         $result = $this->attemptCall($url, $timeout, $user_agent, $verify);

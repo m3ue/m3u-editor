@@ -929,7 +929,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                             'url' => $url,
                                             'username' => $username,
                                             'password' => $password,
-                                        ]);
+                                        ])->withRequestSettings($get('user_agent'), $get('disable_ssl_verification'));
 
                                         $result = $xtream->userInfo(timeout: 10);
 
@@ -1019,7 +1019,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->icon('heroicon-o-signal')
                                         ->color('info')
                                         ->tooltip(__('Test connection to this fallback URL'))
-                                        ->action(function (array $arguments, Repeater $component, ?Playlist $record): void {
+                                        ->action(function (array $arguments, Repeater $component, Get $get, ?Playlist $record): void {
                                             $itemKey = $arguments['item'];
                                             $allItems = $component->getState();
                                             $url = $allItems[$itemKey]['url'] ?? null;
@@ -1053,7 +1053,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                                     'url' => $url,
                                                     'username' => $username,
                                                     'password' => $password,
-                                                ]);
+                                                ])->withRequestSettings($get('user_agent'), $get('disable_ssl_verification'));
 
                                                 $result = $xtream->userInfo(timeout: 10);
 
@@ -1344,7 +1344,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                             ];
                                         }
 
-                                        $result = ProfileService::testCredentials($xtreamConfig);
+                                        $result = ProfileService::testCredentials($xtreamConfig, $get('user_agent'), $get('disable_ssl_verification'));
 
                                         if ($result['valid']) {
                                             // If the primary profile exists, only update max_streams when not manually set
@@ -1505,7 +1505,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         'password' => $password,
                                     ];
 
-                                    $result = ProfileService::testCredentials($testConfig);
+                                    $result = ProfileService::testCredentials($testConfig, $get('user_agent'), $get('disable_ssl_verification'));
 
                                     if ($result['valid']) {
                                         $currentMax = $allItems[$itemKey]['max_streams'] ?? null;
@@ -1552,7 +1552,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         'username' => $data['username'],
                                         'password' => $data['password'],
                                     ];
-                                    $result = ProfileService::testCredentials($testConfig);
+                                    $result = ProfileService::testCredentials($testConfig, $get('user_agent'), $get('disable_ssl_verification'));
                                     if ($result['valid'] && $result['max_connections'] > 1) {
                                         $data['max_streams'] = $result['max_connections'];
                                     }
@@ -1590,7 +1590,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         'username' => $data['username'],
                                         'password' => $data['password'],
                                     ];
-                                    $result = ProfileService::testCredentials($testConfig);
+                                    $result = ProfileService::testCredentials($testConfig, $get('user_agent'), $get('disable_ssl_verification'));
                                     if ($result['valid'] && $result['max_connections'] > 1) {
                                         $data['max_streams'] = $result['max_connections'];
                                     }

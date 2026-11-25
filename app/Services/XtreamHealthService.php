@@ -13,7 +13,7 @@ class XtreamHealthService
      *
      * @return array{reachable: bool, response_time_ms: int, error: ?string}
      */
-    public static function checkUrl(string $url, string $username, string $password, int $timeout = 5, bool $verify = true): array
+    public static function checkUrl(string $url, string $username, string $password, int $timeout = 5, bool $verify = true, ?string $userAgent = null): array
     {
         $start = microtime(true);
 
@@ -21,6 +21,7 @@ class XtreamHealthService
             $normalizedUrl = rtrim($url, '/');
             $response = Http::timeout($timeout)
                 ->withOptions(['verify' => $verify])
+                ->withUserAgent($userAgent ?: XtreamService::DEFAULT_USER_AGENT)
                 ->get("{$normalizedUrl}/player_api.php", [
                     'username' => $username,
                     'password' => $password,
@@ -77,7 +78,7 @@ class XtreamHealthService
         $results = [];
 
         foreach ($urls as $url) {
-            $check = self::checkUrl($url, $username, $password, verify: $verify);
+            $check = self::checkUrl($url, $username, $password, verify: $verify, userAgent: $playlist->user_agent);
             $results[] = array_merge($check, [
                 'url' => $url,
                 'is_primary' => $url === $primaryUrl,
@@ -108,7 +109,7 @@ class XtreamHealthService
         $verify = ! ($playlist->disable_ssl_verification ?? false);
 
         foreach ($urls as $url) {
-            $result = self::checkUrl($url, $username, $password, verify: $verify);
+            $result = self::checkUrl($url, $username, $password, verify: $verify, userAgent: $playlist->user_agent);
             if ($result['reachable']) {
                 Log::info("Xtream health check: {$url} is reachable ({$result['response_time_ms']}ms)", [
                     'playlist_id' => $playlist->id,

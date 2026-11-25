@@ -82,9 +82,12 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
                 return [];
             }
 
-            $xtream = XtreamService::make(xtream_config: $config);
+            [$userAgent, $disableSslVerification] = $this->resolveRequestSettings($playlist);
 
-            return $xtream ? ($xtream->userInfo(timeout: 3) ?: []) : [];
+            $xtream = XtreamService::make(xtream_config: $config)
+                ->withRequestSettings($userAgent, $disableSslVerification);
+
+            return $xtream->userInfo(timeout: 3) ?: [];
         } catch (\Exception $e) {
             Cache::delete($this->cacheKey); // Allow retry on next job run
             Log::error("Failed Xtream fetch for {$type} {$playlist->id}", ['error' => $e->getMessage()]);
@@ -109,6 +112,29 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
 
         return $playlist->getPrimaryCredentialConfig()
             ?? ($sourcePlaylist instanceof Playlist ? $sourcePlaylist->xtream_config : null);
+    }
+
+    /**
+     * The user agent and SSL setting that go with the account from resolveConfig().
+     * Aliases have no SSL setting of their own, so it comes from the source playlist.
+     *
+     * @return array{0: ?string, 1: ?bool}
+     */
+    protected function resolveRequestSettings(Playlist|PlaylistAlias $playlist): array
+    {
+        if ($playlist instanceof Playlist) {
+            return [$playlist->user_agent, $playlist->disable_ssl_verification];
+        }
+
+        $sourcePlaylist = $playlist->getEffectivePlaylist();
+        $userAgent = $playlist->getPrimaryCredentialConfig()
+            ? $playlist->user_agent
+            : $sourcePlaylist?->user_agent;
+
+        return [
+            $userAgent,
+            $sourcePlaylist instanceof Playlist ? $sourcePlaylist->disable_ssl_verification : null,
+        ];
     }
 
     /**
