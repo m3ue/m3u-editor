@@ -1376,6 +1376,7 @@
     "Add resolution": "Ajouter une résolution",
     "Add row": "Ajouter une ligne",
     "Add rule": "Ajouter une règle",
+    "Add text around every stream URL in the M3U of this alias, e.g. http://proxy/?url={url_encoded}. Leave empty to use the normal URL.": "Ajoute du texte autour de chaque URL de flux dans le M3U de cet alias, par ex. http://proxy/?url={url_encoded}. Laissez vide pour utiliser l'URL normale.",
     "Add the selected channel(s) to the chosen channel as failover sources.": "Ajoutez le(s) canal(s) sélectionné(s) au canal choisi en tant que sources de basculement.",
     "Add the selected group(s) to the chosen bouquet.": "Ajouter le(s) groupe(s) sélectionné(s) au bouquet choisi.",
     "Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.": "Ajoutez cette URL comme notification dans Radarr/Sonarr (Paramètres → Connexion → Webhook) pour les mises à jour de la file d'attente en temps réel.",
@@ -2285,6 +2286,7 @@
     "Custom playlist group": "Groupe de liste de lecture personnalisée",
     "Custom playlist is being duplicated": "La playlist personnalisée est en cours de duplication",
     "Custom quality indicators": "Indicateurs de qualité personnalisés",
+    "Custom stream URL format (M3U only)": "Format d'URL de flux personnalisé (M3U uniquement)",
     "DNS failover URLs": "URL de basculement DNS",
     "DVR": "Enregistreur vidéo numérique",
     "DVR / Live TV Tuner": "DVR / Tuner TV en direct",
@@ -5864,6 +5866,7 @@
     "The existing Emby library's name, type, selected path, or ID no longer matches this mapping. Choose an available destination in the mapping or update the library in Emby.": "Le nom, le type, le chemin sélectionné ou l'ID de la bibliothèque Emby existante ne correspond plus à cette association. Choisissez une destination disponible dans l'association ou mettez à jour la bibliothèque dans Emby.",
     "The file extension of the VOD container (e.g., mp4, mkv, etc.).": "L'extension de fichier du conteneur VOD (par exemple, mp4, mkv, etc.).",
     "The following profiles are referenced by adaptive profiles and cannot be deleted: ": "Les profils suivants sont référencés par des profils adaptatifs et ne peuvent pas être supprimés :",
+    "The format must be a single line and contain {url} or {url_encoded}.": "Le format doit tenir sur une seule ligne et contenir {url} ou {url_encoded}.",
     "The free key is not accepted. A paid TheSportsDB API key is required.": "La clé gratuite n'est pas acceptée. Une clé API TheSportsDB payante est requise.",
     "The full catalog (all :total items) is what actually gets synced - this preview is capped so a large library does not crash the browser.": "Le catalogue complet (les :total éléments) est ce qui est réellement synchronisé - cet aperçu est limité pour qu'une grande bibliothèque ne fasse pas planter le navigateur.",
     "The group channels have been disabled.": "Les canaux de groupe ont été désactivés.",
@@ -6843,5 +6846,6 @@
     "{1} :count league selected|[2,*] :count leagues selected": "{1} :count ligue sélectionnée|[2,*] :count ligues sélectionnées",
     "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.": "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.",
     "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.": "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.",
+    "{url} is replaced with the stream URL, and {url_encoded} with a URL-encoded version for use as a query parameter. In shell commands, put single quotes around {url}.": "{url} est remplacé par l'URL du flux et {url_encoded} par une version encodée à utiliser comme paramètre de requête. Dans les commandes shell, placez {url} entre guillemets simples.",
     "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.": "⚠️ AVERTISSEMENT IPTV : cela analysera chaque flux pour déterminer la résolution, ce qui peut entraîner une limitation ou un blocage du débit auprès des fournisseurs IPTV."
 }

@@ -581,6 +581,23 @@ class PlaylistAlias extends Model
     }
 
     /**
+     * Apply this alias's M3U URL template (if any) to a final stream URL. Single quotes
+     * are encoded so a raw provider URL cannot close a single-quoted '{url}' when the
+     * template is run as a shell command by the client.
+     */
+    public function formatM3uUrl(string $url): string
+    {
+        if ($url === '' || blank($this->m3u_url_template)) {
+            return $url;
+        }
+
+        return strtr($this->m3u_url_template, [
+            '{url}' => str_replace("'", '%27', $url),
+            '{url_encoded}' => rawurlencode($url),
+        ]);
+    }
+
+    /**
      * Check if this alias/playlist supports xtream
      */
     public function getXtreamAttribute(): bool

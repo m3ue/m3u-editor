@@ -1376,6 +1376,7 @@
     "Add resolution": "添加分辨率",
     "Add row": "添加行",
     "Add rule": "添加规则",
+    "Add text around every stream URL in the M3U of this alias, e.g. http://proxy/?url={url_encoded}. Leave empty to use the normal URL.": "在此别名的 M3U 中为每个流 URL 前后添加文本，例如 http://proxy/?url={url_encoded}。留空则使用正常 URL。",
     "Add the selected channel(s) to the chosen channel as failover sources.": "将所选频道添加为当前频道的故障转移。",
     "Add the selected group(s) to the chosen bouquet.": "将选定的分组添加到所选节目包。",
     "Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.": "将此 URL 添加为 Radarr/Sonarr 中的通知（设置→连接→Webhook）以进行实时队列更新。",
@@ -2285,6 +2286,7 @@
     "Custom playlist group": "自定义播放列表分组",
     "Custom playlist is being duplicated": "正在复制自定义播放列表",
     "Custom quality indicators": "定制质量指标",
+    "Custom stream URL format (M3U only)": "自定义流 URL 格式（仅 M3U）",
     "DNS failover URLs": "DNS 故障转移 URL",
     "DVR": "DVR",
     "DVR / Live TV Tuner": "DVR / 直播电视调谐器",
@@ -5864,6 +5866,7 @@
     "The existing Emby library's name, type, selected path, or ID no longer matches this mapping. Choose an available destination in the mapping or update the library in Emby.": "现有 Emby 媒体库的名称、类型、所选路径或 ID 已与此映射不再匹配。请在映射中选择一个可用目标位置，或在 Emby 中更新该媒体库。",
     "The file extension of the VOD container (e.g., mp4, mkv, etc.).": "VOD 封装格式的文件扩展名（如 mp4、mkv 等）。",
     "The following profiles are referenced by adaptive profiles and cannot be deleted: ": "以下配置文件被自适应配置文件引用，无法删除：",
+    "The format must be a single line and contain {url} or {url_encoded}.": "格式必须为单行，并包含 {url} 或 {url_encoded}。",
     "The free key is not accepted. A paid TheSportsDB API key is required.": "不接受免费密钥。需要付费的 TheSportsDB API 密钥。",
     "The full catalog (all :total items) is what actually gets synced - this preview is capped so a large library does not crash the browser.": "实际同步的是完整目录（全部 :total 个项目）--为避免大型媒体库导致浏览器崩溃，此预览已做限制。",
     "The group channels have been disabled.": "分组频道已被禁用。",
@@ -6843,5 +6846,6 @@
     "{1} :count league selected|[2,*] :count leagues selected": "{1} 已选择 :count 个联赛|[2,*] 已选择 :count 个联赛",
     "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.": "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.",
     "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.": "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.",
+    "{url} is replaced with the stream URL, and {url_encoded} with a URL-encoded version for use as a query parameter. In shell commands, put single quotes around {url}.": "{url} 会替换为流 URL，{url_encoded} 会替换为经过 URL 编码的版本，可用作查询参数。在 shell 命令中请用单引号括住 {url}。",
     "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.": "⚠️ IPTV 警告：这将分析每个流以确定分辨率，这可能会导致 IPTV 提供商的速率限制或阻塞。"
 }

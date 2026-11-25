@@ -1376,6 +1376,7 @@
     "Add resolution": "Auflösung hinzufügen",
     "Add row": "Zeile hinzufügen",
     "Add rule": "Regel hinzufügen",
+    "Add text around every stream URL in the M3U of this alias, e.g. http://proxy/?url={url_encoded}. Leave empty to use the normal URL.": "Fügt Text um jede Stream-URL in der M3U dieses Alias hinzu, z. B. http://proxy/?url={url_encoded}. Leer lassen, um die normale URL zu verwenden.",
     "Add the selected channel(s) to the chosen channel as failover sources.": "Fügen Sie die ausgewählten Kanäle als Failover-Quellen zum ausgewählten Kanal hinzu.",
     "Add the selected group(s) to the chosen bouquet.": "Die ausgewählten Gruppe(n) zum gewählten Bouquet hinzufügen.",
     "Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.": "Fügen Sie diese URL als Benachrichtigung in Radarr/Sonarr hinzu (Einstellungen → Verbinden → Webhook), um Warteschlangenaktualisierungen in Echtzeit zu erhalten.",
@@ -2285,6 +2286,7 @@
     "Custom playlist group": "Benutzerdefinierte Wiedergabelistengruppe",
     "Custom playlist is being duplicated": "Die benutzerdefinierte Wiedergabeliste wird dupliziert",
     "Custom quality indicators": "Benutzerdefinierte Qualitätsindikatoren",
+    "Custom stream URL format (M3U only)": "Benutzerdefiniertes Stream-URL-Format (nur M3U)",
     "DNS failover URLs": "DNS-Failover-URLs",
     "DVR": "DVR",
     "DVR / Live TV Tuner": "DVR / Live-TV-Tuner",
@@ -5864,6 +5866,7 @@
     "The existing Emby library's name, type, selected path, or ID no longer matches this mapping. Choose an available destination in the mapping or update the library in Emby.": "Name, Typ, ausgewählter Pfad oder ID der vorhandenen Emby-Bibliothek stimmen nicht mehr mit dieser Zuordnung überein. Wählen Sie ein verfügbares Ziel in der Zuordnung oder aktualisieren Sie die Bibliothek in Emby.",
     "The file extension of the VOD container (e.g., mp4, mkv, etc.).": "Die Dateierweiterung des VOD-Containers (z. B. mp4, mkv usw.).",
     "The following profiles are referenced by adaptive profiles and cannot be deleted: ": "Die folgenden Profile werden von adaptiven Profilen referenziert und können nicht gelöscht werden:",
+    "The format must be a single line and contain {url} or {url_encoded}.": "Das Format muss einzeilig sein und {url} oder {url_encoded} enthalten.",
     "The free key is not accepted. A paid TheSportsDB API key is required.": "Der kostenlose Schlüssel wird nicht akzeptiert. Ein kostenpflichtiger TheSportsDB-API-Schlüssel ist erforderlich.",
     "The full catalog (all :total items) is what actually gets synced - this preview is capped so a large library does not crash the browser.": "Der vollständige Katalog (alle :total Elemente) wird tatsächlich synchronisiert - diese Vorschau ist begrenzt, damit eine große Bibliothek den Browser nicht zum Absturz bringt.",
     "The group channels have been disabled.": "Die Gruppenkanäle wurden deaktiviert.",
@@ -6843,5 +6846,6 @@
     "{1} :count league selected|[2,*] :count leagues selected": "{1} :count Liga ausgewählt|[2,*] :count Ligen ausgewählt",
     "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.": "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.",
     "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.": "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.",
+    "{url} is replaced with the stream URL, and {url_encoded} with a URL-encoded version for use as a query parameter. In shell commands, put single quotes around {url}.": "{url} wird durch die Stream-URL ersetzt und {url_encoded} durch eine URL-kodierte Version zur Verwendung als Abfrageparameter. Setzen Sie {url} in Shell-Befehlen in einfache Anführungszeichen.",
     "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.": "⚠️ IPTV-WARNUNG: Dadurch wird jeder Stream analysiert, um die Auflösung zu bestimmen, was zu Ratenbegrenzung oder Blockierung bei IPTV-Anbietern führen kann."
 }

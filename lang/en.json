@@ -2390,6 +2390,7 @@
     "Add resolution": "Add resolution",
     "Add row": "Add row",
     "Add rule": "Add rule",
+    "Add text around every stream URL in the M3U of this alias, e.g. http://proxy/?url={url_encoded}. Leave empty to use the normal URL.": "Add text around every stream URL in the M3U of this alias, e.g. http://proxy/?url={url_encoded}. Leave empty to use the normal URL.",
     "Add the selected channel(s) to the chosen channel as failover sources.": "Add the selected channel(s) to the chosen channel as failover sources.",
     "Add the selected group(s) to the chosen bouquet.": "Add the selected group(s) to the chosen bouquet.",
     "Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.": "Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.",
@@ -3303,6 +3304,7 @@
     "Custom playlist group": "Custom playlist group",
     "Custom playlist is being duplicated": "Custom playlist is being duplicated",
     "Custom quality indicators": "Custom quality indicators",
+    "Custom stream URL format (M3U only)": "Custom stream URL format (M3U only)",
     "DNS failover URLs": "DNS failover URLs",
     "DVR": "DVR",
     "DVR / Live TV Tuner": "DVR / Live TV Tuner",
@@ -6890,6 +6892,7 @@
     "The existing Emby library's name, type, selected path, or ID no longer matches this mapping. Choose an available destination in the mapping or update the library in Emby.": "The existing Emby library's name, type, selected path, or ID no longer matches this mapping. Choose an available destination in the mapping or update the library in Emby.",
     "The file extension of the VOD container (e.g., mp4, mkv, etc.).": "The file extension of the VOD container (e.g., mp4, mkv, etc.).",
     "The following profiles are referenced by adaptive profiles and cannot be deleted: ": "The following profiles are referenced by adaptive profiles and cannot be deleted: ",
+    "The format must be a single line and contain {url} or {url_encoded}.": "The format must be a single line and contain {url} or {url_encoded}.",
     "The free key is not accepted. A paid TheSportsDB API key is required.": "The free key is not accepted. A paid TheSportsDB API key is required.",
     "The full catalog (all :total items) is what actually gets synced - this preview is capped so a large library does not crash the browser.": "The full catalog (all :total items) is what actually gets synced - this preview is capped so a large library does not crash the browser.",
     "The group channels have been disabled.": "The group channels have been disabled.",
@@ -7870,5 +7873,6 @@
     "{1} :count league selected|[2,*] :count leagues selected": "{1} :count league selected|[2,*] :count leagues selected",
     "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.": "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.",
     "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.": "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.",
+    "{url} is replaced with the stream URL, and {url_encoded} with a URL-encoded version for use as a query parameter. In shell commands, put single quotes around {url}.": "{url} is replaced with the stream URL, and {url_encoded} with a URL-encoded version for use as a query parameter. In shell commands, put single quotes around {url}.",
     "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.": "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers."
 }

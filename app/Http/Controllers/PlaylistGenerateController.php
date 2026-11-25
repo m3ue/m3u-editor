@@ -114,6 +114,9 @@ class PlaylistGenerateController extends Controller
                 echo "#EXTM3U x-tvg-url=\"$epgUrl\" \n";
                 $numberSequence = new ChannelNumberSequence($playlist);
                 $idChannelBy = $playlist->id_channel_by;
+                $formatUrl = $playlist instanceof PlaylistAlias
+                    ? $playlist->formatM3uUrl(...)
+                    : fn (string $url): string => $url;
                 // Memoized by playlist_id so a batch of channels sharing the same source
                 // playlist (the common case) only resolves it once rather than per row.
                 $sourcePlaylistCache = [];
@@ -297,7 +300,7 @@ class PlaylistGenerateController extends Controller
                             echo "#KODIPROP:{$kodidrop['key']}={$kodidrop['value']}\n";
                         }
                     }
-                    echo $url."\n";
+                    echo $formatUrl($url)."\n";
                 }
 
                 // If the playlist includes series in M3U, include the series episodes
@@ -399,7 +402,7 @@ class PlaylistGenerateController extends Controller
                             }
                             $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
                             echo "$extInf,".$title."\n";
-                            echo $url."\n";
+                            echo $formatUrl($url)."\n";
                         }
                     }
                 }

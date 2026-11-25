@@ -1192,7 +1192,24 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Section::make(__('Playlist Output'))
                                 ->description(__('Determines how the playlist is output'))
                                 ->collapsible()
-                                ->schema(PlaylistFacade::getOutputTogglesSchema()),
+                                ->schema([
+                                    ...PlaylistFacade::getOutputTogglesSchema(),
+                                    Forms\Components\TextInput::make('m3u_url_template')
+                                        ->extraInputAttributes(['class' => 'privacy-sensitive'])
+                                        ->label(__('Custom stream URL format (M3U only)'))
+                                        ->placeholder("pipe:///path/to/wrapper.sh '{url}'")
+                                        ->hintIcon(
+                                            'heroicon-m-question-mark-circle',
+                                            tooltip: __('{url} is replaced with the stream URL, and {url_encoded} with a URL-encoded version for use as a query parameter. In shell commands, put single quotes around {url}.')
+                                        )
+                                        ->helperText(__('Add text around every stream URL in the M3U of this alias, e.g. http://proxy/?url={url_encoded}. Leave empty to use the normal URL.'))
+                                        ->maxLength(2000)
+                                        ->regex('/\A[^\r\n]*\{url(?:_encoded)?\}[^\r\n]*\z/')
+                                        ->validationMessages([
+                                            'regex' => __('The format must be a single line and contain {url} or {url_encoded}.'),
+                                        ])
+                                        ->columnSpanFull(),
+                                ]),
                             Section::make(__('Streaming Output'))
                                 ->description(__('Output processing options'))
                                 ->collapsible()
