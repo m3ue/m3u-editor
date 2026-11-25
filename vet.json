@@ -262,8 +262,8 @@
             "hash": "tree-v2:b454eb2bd1b250346c7d0af0e5b3caaeafa1b21468bca4ff4601a6a7bd91baae"
         },
         "league/csv": {
-            "version": "9.29.0",
-            "hash": "tree-v2:916333b45da28c6893a81aa134d6f679438288d32921bb0ab1efb41782ac4595"
+            "version": "9.29.1",
+            "hash": "tree-v2:cec6e8e6f75c436a40117fe0b4162b50642ea4e5655431a7af61838added6fcd"
         },
         "league/flysystem": {
             "version": "3.36.0",
