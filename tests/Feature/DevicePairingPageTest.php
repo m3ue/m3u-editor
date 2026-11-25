@@ -10,6 +10,7 @@ use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -359,3 +360,56 @@ it('starts and resets the credential rows in the raw shape the select binds to',
 
     expect(array_values($page->get('data.playlist_auth_ids')))->toBe([['playlist_auth_id' => null]]);
 });
+
+/**
+ * The whole chain a TV goes through, with nothing written to the database by
+ * the test itself: the TV's code request, the page filled the way the browser
+ * does (through the row keys the page rendered), and the TV's poll.
+ */
+it('hands the TV exactly the credentials picked on the page, in order', function (bool $isAdmin) {
+    $user = $isAdmin ? User::factory()->admin()->create() : User::factory()->create();
+
+    // Occupy the lowest ids: casting a raw repeater row to int always gave 1.
+    PlaylistAuth::factory()->count(2)->for(User::factory()->create())->create();
+    $living = PlaylistAuth::factory()->for($user)->create(['name' => 'Living Room', 'username' => 'living', 'password' => 'l-pass']);
+    $kids = PlaylistAuth::factory()->for($user)->create(['name' => 'Kids', 'username' => 'kids', 'password' => 'k-pass']);
+
+    $this->actingAs($user);
+    $page = Livewire::withQueryParams([])->test(PairDevice::class);
+
+    $pair = function (PlaylistAuth ...$picked) use ($page): array {
+        $code = $this->postJson('/api/device/code')->assertOk()->json();
+
+        $page->set('data.user_code', strtolower(str_replace('-', '', $code['user_code'])));
+
+        $rowKeys = array_keys($page->get('data.playlist_auth_ids'));
+        expect($rowKeys)->toHaveCount(1);
+
+        foreach ($picked as $index => $playlistAuth) {
+            $key = $rowKeys[$index] ?? (string) Str::uuid();
+            $page->set("data.playlist_auth_ids.{$key}.playlist_auth_id", (string) $playlistAuth->id);
+        }
+
+        $page->call('approve')->assertHasNoFormErrors();
+
+        return $this->postJson('/api/device/token', ['device_code' => $code['device_code']])->assertOk()->json();
+    };
+
+    $kidsEntry = ['name' => 'Kids', 'username' => 'kids', 'password' => 'k-pass'];
+    $livingEntry = ['name' => 'Living Room', 'username' => 'living', 'password' => 'l-pass'];
+
+    expect($pair($kids, $living))->toBe([
+        'status' => 'approved',
+        'username' => 'kids',
+        'password' => 'k-pass',
+        'playlists' => [$kidsEntry, $livingEntry],
+    ]);
+
+    // Pairing a second TV from the same page, without reloading it.
+    expect($pair($living))->toBe([
+        'status' => 'approved',
+        'username' => 'living',
+        'password' => 'l-pass',
+        'playlists' => [$livingEntry],
+    ]);
+})->with(['admin' => true, 'non-admin' => false]);
