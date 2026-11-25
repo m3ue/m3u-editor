@@ -1113,10 +1113,11 @@ class M3uProxyService
      * @param  Channel  $channel
      * @param  Request|null  $request  Optional request for additional parameters (e.g. timeshift)
      * @param  StreamProfile|null  $profile  Optional stream profile to apply
+     * @param  bool  $reuseDvrRecording  Play a DVR recording already in progress for the channel instead of opening a stream
      *
      * @throws Exception when base URL missing or API returns an error
      */
-    public function getChannelUrl($playlist, $channel, ?Request $request = null, ?StreamProfile $profile = null, ?string $username = null, ?int $playlistAuthId = null): string
+    public function getChannelUrl($playlist, $channel, ?Request $request = null, ?StreamProfile $profile = null, ?string $username = null, ?int $playlistAuthId = null, bool $reuseDvrRecording = true): string
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
@@ -1209,7 +1210,7 @@ class M3uProxyService
         // Before creating a new stream, check if there's an active DVR recording for this channel.
         // If so, route through the editor's DVR HLS proxy so we piggyback off the existing
         // broadcast instead of creating a duplicate upstream connection to the provider.
-        if (! $isTimeshiftRequest) {
+        if ($reuseDvrRecording && ! $isTimeshiftRequest) {
             $dvrRecording = DvrRecording::where('channel_id', $channel->id)
                 ->where('status', DvrRecordingStatus::Recording)
                 ->whereNotNull('proxy_network_id')
@@ -3197,20 +3198,25 @@ class M3uProxyService
      */
     protected function buildProxyUrl(string $streamId, $format = 'hls', ?string $username = null): string
     {
-        $baseUrl = $this->getPublicUrl();
-        if ($format === 'hls' || $format === 'm3u8') {
-            // HLS format: /hls/{stream_id}/playlist.m3u8
-            $url = $baseUrl.'/hls/'.$streamId.'/playlist.m3u8';
-        } elseif ($format === 'mpd' || $format === 'dash') {
-            // DASH format: /dash/{stream_id}/manifest.mpd
-            $url = $baseUrl.'/dash/'.$streamId.'/manifest.mpd';
-        } else {
-            // Direct stream format: /stream/{stream_id}
-            $url = $baseUrl.'/stream/'.$streamId;
-        }
+        $url = $this->buildStreamUrl($this->getPublicUrl(), $streamId, $format);
 
         // Append trace parameters if provided
         return $this->appendProxyTraceParams($url, $username);
+    }
+
+    /**
+     * Build a stream's URL for its output format under the given proxy base URL.
+     */
+    private function buildStreamUrl(string $baseUrl, string $streamId, ?string $format): string
+    {
+        return match ($format) {
+            // HLS format: /hls/{stream_id}/playlist.m3u8
+            'hls', 'm3u8' => $baseUrl.'/hls/'.$streamId.'/playlist.m3u8',
+            // DASH format: /dash/{stream_id}/manifest.mpd
+            'mpd', 'dash' => $baseUrl.'/dash/'.$streamId.'/manifest.mpd',
+            // Direct stream format: /stream/{stream_id}
+            default => $baseUrl.'/stream/'.$streamId,
+        };
     }
 
     /**
@@ -3435,10 +3441,14 @@ class M3uProxyService
     }
 
     /**
-     * Find an active stream ID for a given channel on the proxy.
-     * Returns the stream ID if found, null otherwise.
+     * Internal URL of a live stream the proxy already has open for a channel, for a DVR
+     * recording to read from instead of opening its own provider connection.
+     *
+     * Matches on the channel alone: a stream opened through a custom, merged or alias playlist
+     * is tagged with that playlist, but carries the same channel. Untranscoded streams win, so
+     * a recording keeps source quality when both kinds are open.
      */
-    public function getActiveStreamIdForChannel(int $channelId, string $playlistUuid): ?string
+    public function getActiveStreamUrlForChannel(int $channelId): ?string
     {
         try {
             $endpoint = $this->apiBaseUrl.'/streams/by-metadata';
@@ -3456,17 +3466,18 @@ class M3uProxyService
                 return null;
             }
 
-            $data = $response->json();
-            $matchingStreams = $data['matching_streams'] ?? [];
+            $streams = collect($response->json('matching_streams') ?? [])
+                ->filter(fn (array $stream): bool => ($stream['metadata']['original_channel_id'] ?? null) == $channelId
+                    // Catchup plays the same channel, but an earlier programme
+                    && ($stream['metadata']['timeshift'] ?? null) !== 'true')
+                ->sortBy(fn (array $stream): int => ($stream['metadata']['transcoding'] ?? null) === 'true' ? 1 : 0);
 
-            foreach ($matchingStreams as $stream) {
-                $metadata = $stream['metadata'] ?? [];
+            foreach ($streams as $stream) {
+                $format = $this->getActiveStreamFormat($stream);
 
-                if (
-                    ($metadata['original_channel_id'] ?? null) == $channelId &&
-                    ($metadata['original_playlist_uuid'] ?? null) === $playlistUuid
-                ) {
-                    return $stream['stream_id'];
+                // No capture path for DASH, so the recording opens its own connection
+                if ($format !== 'mpd' && $format !== 'dash') {
+                    return $this->buildStreamUrl($this->getInternalBaseUrl(), $stream['stream_id'], $format);
                 }
             }
 
@@ -3479,20 +3490,37 @@ class M3uProxyService
     }
 
     /**
-     * Build the internal proxy URL for an existing stream (for DVR piggybacking).
-     * Uses the API base URL so the broadcast FFmpeg can reach the stream from within the proxy.
+     * The output format of a stream listed by the proxy, as its viewers were given it.
+     *
+     * @param  array<string, mixed>  $stream
      */
-    public function getStreamProxyUrl(string $streamId): string
+    private function getActiveStreamFormat(array $stream): string
+    {
+        $metadata = $stream['metadata'] ?? [];
+
+        if (($metadata['transcoding'] ?? null) === 'true') {
+            return StreamProfile::find($metadata['profile_id'] ?? null)?->format ?? 'ts';
+        }
+
+        // Normalized streams are always served as MPEG-TS
+        if (($metadata['normalize_live_output'] ?? null) === 'true') {
+            return 'ts';
+        }
+
+        return ($stream['stream_type'] ?? null) === 'HLS' ? 'hls' : $this->getFormatFromUrl($stream['url'] ?? null);
+    }
+
+    /**
+     * The API base URL, with a scheme: it may be configured without one (e.g.
+     * "m3u-proxy:38085"), and the proxy requires HTTP/HTTPS for stream_url.
+     */
+    private function getInternalBaseUrl(): string
     {
         $baseUrl = $this->getApiBaseUrl();
 
-        // The API base URL may be configured without a scheme (e.g. "m3u-proxy:38085").
-        // The proxy requires HTTP/HTTPS protocol for stream_url, so prepend if missing.
-        if (! str_starts_with($baseUrl, 'http://') && ! str_starts_with($baseUrl, 'https://')) {
-            $baseUrl = 'http://'.$baseUrl;
-        }
-
-        return $baseUrl.'/stream/'.$streamId;
+        return str_starts_with($baseUrl, 'http://') || str_starts_with($baseUrl, 'https://')
+            ? $baseUrl
+            : 'http://'.$baseUrl;
     }
 
     /**

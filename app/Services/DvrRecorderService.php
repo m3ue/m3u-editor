@@ -185,13 +185,21 @@ class DvrRecorderService
      */
     private function resolveCaptureUrl(DvrRecording $recording): string
     {
-        // Resolve the raw source URL for the recording.
         // If there's already an active stream on the proxy for this channel, piggyback
         // off it by using the stream's local proxy URL as the broadcast source. This
         // avoids creating a second upstream connection to the provider, which can cause
         // circuit-breaker drops (provider kills one connection when a second opens).
+        // Checked before selecting a provider profile, so sharing a stream never reserves a slot.
         $channel = $recording->channel;
-        if ($channel) {
+        $activeStreamUrl = $channel ? $this->proxy->getActiveStreamUrlForChannel($channel->id) : null;
+
+        if ($activeStreamUrl) {
+            Log::info('DVR: Piggybacking off existing stream', [
+                'recording_id' => $recording->id,
+                'proxy_url' => $activeStreamUrl,
+            ]);
+            $streamUrl = $activeStreamUrl;
+        } elseif ($channel) {
             $rawUrl = $channel->url_custom ?? $channel->url ?? $recording->stream_url;
 
             // When the channel's source playlist pools provider profiles, resolve the
@@ -208,6 +216,9 @@ class DvrRecorderService
                         null,
                         null,
                         $recording->user?->name,
+                        // A resumed recording is already marked as recording, so it would be
+                        // handed its own playlist as its source.
+                        reuseDvrRecording: $recording->status !== DvrRecordingStatus::Recording,
                     );
                     if (empty($streamUrl)) {
                         $streamUrl = $rawUrl;
@@ -245,24 +256,6 @@ class DvrRecorderService
 
         if (empty($streamUrl)) {
             throw new Exception("Recording {$recording->id} has no stream_url - cannot start");
-        }
-
-        // Check if there's an existing stream for this channel to piggyback off.
-        // Use the channel's own real source playlist (not the DvrSetting's owner,
-        // which may be a Custom/Merged playlist spanning multiple real playlists)
-        // since that's what the proxy actually keys active streams by.
-        $playlistUuid = $channel?->getEffectivePlaylist()?->uuid;
-        if ($channel && $playlistUuid) {
-            $activeStreamId = $this->proxy->getActiveStreamIdForChannel($channel->id, $playlistUuid);
-            if ($activeStreamId) {
-                $proxyUrl = $this->proxy->getStreamProxyUrl($activeStreamId);
-                Log::info('DVR: Piggybacking off existing stream', [
-                    'recording_id' => $recording->id,
-                    'stream_id' => $activeStreamId,
-                    'proxy_url' => $proxyUrl,
-                ]);
-                $streamUrl = $proxyUrl;
-            }
         }
 
         if ($streamUrl !== $recording->stream_url) {
