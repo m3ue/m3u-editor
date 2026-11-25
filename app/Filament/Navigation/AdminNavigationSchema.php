@@ -3,6 +3,7 @@
 namespace App\Filament\Navigation;
 
 use App\Filament\Clusters\Devices\DevicesCluster;
+use App\Filament\Clusters\Devices\Pages\PairDevice;
 use App\Filament\Clusters\MediaServers\MediaServersCluster;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Clusters\Settings\SettingsCluster;
@@ -119,6 +120,17 @@ final class AdminNavigationSchema
                     'playlist_aliases' => self::entry(PlaylistAliasesCluster::class),
                     'playlist_viewers' => self::entry(PlaylistViewerResource::class),
                     'playlist_auths' => self::entry(PlaylistAuthResource::class),
+                    'device_pairing' => [
+                        // Admins reach it through Devices in the Administration group.
+                        'available' => fn (): bool => ! self::isAdmin()
+                            && PairDevice::shouldRegisterNavigation()
+                            && PairDevice::canAccess(),
+                        // Filament rejects item icons in a group that has its own.
+                        'resolve' => fn () => array_map(
+                            fn (NavigationItem $item): NavigationItem => $item->icon(null)->activeIcon(null),
+                            PairDevice::getNavigationItems(),
+                        ),
+                    ],
                     'stream_file_settings' => self::entry(StreamFileSettingResource::class),
                     'channel_scrubbers' => self::entry(ChannelScrubberResource::class),
                     'cached_downloads' => [

@@ -35,15 +35,32 @@ class PairDevice extends Page
     /** @var array<string, mixed> */
     public ?array $data = [];
 
+    /**
+     * Open to every user, unlike the rest of the Devices cluster: a pairing can
+     * only grant the signed-in user's own Playlist Auths.
+     */
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->isAdmin()
-            && TvDeviceResource::isDevicePairingEnabled();
+        return auth()->check() && TvDeviceResource::isDevicePairingEnabled();
     }
 
     public static function shouldRegisterNavigation(): bool
     {
         return TvDeviceResource::isDevicePairingEnabled();
+    }
+
+    /**
+     * Without access to the Devices cluster this is a standalone page, linked
+     * from the Playlist group (see AdminNavigationSchema).
+     */
+    public function getSubNavigation(): array
+    {
+        return DevicesCluster::canAccess() ? parent::getSubNavigation() : [];
+    }
+
+    public function getBreadcrumbs(): array
+    {
+        return DevicesCluster::canAccess() ? parent::getBreadcrumbs() : [];
     }
 
     public static function getNavigationLabel(): string

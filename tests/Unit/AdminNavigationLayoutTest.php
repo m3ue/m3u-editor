@@ -179,6 +179,30 @@ it('never exposes a group the requesting user is not permitted to see, even if s
         ->not->toContain('Proxy');
 });
 
+it('links device pairing after Playlist Auths for non-admins only', function () {
+    $playlistItems = function (): array {
+        $builder = app(AdminNavigationMenuBuilder::class)->build(new NavigationBuilder, defaultPanelSettings());
+
+        return collect(collect($builder->getNavigation())
+            ->first(fn ($group) => $group->getLabel() === 'Playlist')
+            ->getItems())->values()->all();
+    };
+    $labels = fn (array $items): array => array_map(fn ($item) => $item->getLabel(), $items);
+
+    $this->actingAs(User::factory()->admin()->create());
+    expect($labels($playlistItems()))->not->toContain('Device Pairing');
+
+    $this->actingAs(User::factory()->create());
+    $items = $playlistItems();
+    $position = array_search('Device Pairing', $labels($items), true);
+
+    expect($position)->not->toBeFalse()
+        ->and($items[$position - 1]->getLabel())->toBe('Playlist Auths')
+        // The sidebar throws when a group and one of its items both have icons.
+        ->and($items[$position]->getIcon())->toBeNull()
+        ->and($items[$position]->getActiveIcon())->toBeNull();
+});
+
 it('keeps every sidebar group collapsible, with only tools collapsed by default', function () {
     $this->actingAs(User::factory()->admin()->create());
 

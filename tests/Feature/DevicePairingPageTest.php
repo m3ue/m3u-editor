@@ -2,7 +2,9 @@
 
 use App\Filament\Clusters\Devices\DevicesCluster;
 use App\Filament\Clusters\Devices\Pages\PairDevice;
+use App\Filament\Resources\TvClientProfiles\TvClientProfileResource;
 use App\Filament\Resources\TvDevices\TvDeviceResource;
+use App\Filament\Resources\TvHomeScreens\TvHomeScreenResource;
 use App\Models\DeviceAuthorization;
 use App\Models\PlaylistAuth;
 use App\Models\User;
@@ -25,11 +27,85 @@ function credentialRows(int ...$ids): array
         ->all();
 }
 
-it('hides the device pairing page from non-admins', function () {
+it('gives non-admins the device pairing page but not the rest of the devices cluster', function () {
     $this->actingAs(User::factory()->create());
 
-    expect(PairDevice::canAccess())->toBeFalse()
-        ->and(TvDeviceResource::canAccess())->toBeFalse();
+    expect(PairDevice::canAccess())->toBeTrue()
+        ->and(TvDeviceResource::canAccess())->toBeFalse()
+        ->and(TvClientProfileResource::canAccess())->toBeFalse()
+        ->and(TvHomeScreenResource::canAccess())->toBeFalse()
+        ->and(DevicesCluster::canAccess())->toBeFalse();
+});
+
+it('requires signing in to reach the device pairing page', function () {
+    expect(PairDevice::canAccess())->toBeFalse();
+
+    $this->get(PairDevice::getUrl())->assertRedirect();
+});
+
+it('opens the pairing page for a non-admin following the QR code', function () {
+    $this->actingAs(User::factory()->create());
+
+    $this->get('/pdt?code=XKQP-9F3T')
+        ->assertRedirect(PairDevice::getUrl(['code' => 'XKQP-9F3T']));
+
+    $this->get(PairDevice::getUrl(['code' => 'XKQP-9F3T']))
+        ->assertOk()
+        ->assertSee('Device Pairing')
+        ->assertDontSee('href="'.DevicesCluster::getUrl().'"', false);
+});
+
+it('keeps the devices sub-navigation on the pairing page for admins only', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    expect(Livewire::test(PairDevice::class)->instance()->getSubNavigation())->not->toBeEmpty();
+
+    $this->actingAs(User::factory()->create());
+    expect(Livewire::test(PairDevice::class)->instance()->getSubNavigation())->toBeEmpty();
+});
+
+it('lets a non-admin pair a device with their own credential', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $playlistAuth = PlaylistAuth::factory()->for($user)->create();
+    $deviceAuth = DeviceAuthorization::factory()->create();
+
+    Livewire::test(PairDevice::class)
+        ->set('data.user_code', $deviceAuth->user_code)
+        ->set('data.playlist_auth_ids', credentialRows($playlistAuth->id))
+        ->call('approve')
+        ->assertHasNoFormErrors();
+
+    $deviceAuth->refresh();
+    expect($deviceAuth->status)->toBe('approved')
+        ->and($deviceAuth->playlist_auth_id)->toBe($playlistAuth->id)
+        ->and($deviceAuth->approved_by_user_id)->toBe($user->id);
+});
+
+it('refuses a non-admin pairing with another user\'s credential', function () {
+    $this->actingAs(User::factory()->create());
+
+    $other = PlaylistAuth::factory()->for(User::factory()->admin()->create())->create();
+    $deviceAuth = DeviceAuthorization::factory()->create();
+
+    Livewire::test(PairDevice::class)
+        ->set('data.user_code', $deviceAuth->user_code)
+        ->set('data.playlist_auth_ids', credentialRows($other->id))
+        ->call('approve')
+        ->assertHasFormErrors();
+
+    expect($deviceAuth->refresh()->status)->toBe('pending');
+});
+
+it('hides the pairing page from non-admins when device pairing is disabled', function () {
+    $this->actingAs(User::factory()->create());
+
+    $settings = Mockery::mock(GeneralSettings::class);
+    $settings->device_pairing_enabled = false;
+    $settings->app_output_enabled = true;
+    app()->instance(GeneralSettings::class, $settings);
+
+    expect(PairDevice::canAccess())->toBeFalse();
 });
 
 it('allows admins to access the device pairing page', function () {
