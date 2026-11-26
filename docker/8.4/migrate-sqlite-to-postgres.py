@@ -12,11 +12,18 @@ Flow:
      which migrations were already applied and only runs new ones.
   4. Create unique indexes and FK constraints from SQLite's PRAGMA metadata so that
      post-import migrations which drop-then-recreate constraints can find them.
-  5. Reset sequences.
+  5. Recreate regular (non-unique) indexes from SQLite's PRAGMA metadata. Without
+     these, every index added by a Laravel migration before the import is lost, and
+     later migrations that drop one of them by name cannot find it.
+  6. Reset sequences.
   (db-init.sh runs `php artisan migrate` afterwards to apply new migrations.)
 
 Run manually inside the container:
   python3 /var/www/html/docker/8.4/migrate-sqlite-to-postgres.py
+
+Restore only the missing regular indexes on an install that was already migrated
+(reads the SQLite file, creates nothing that already exists, imports no data):
+  python3 /var/www/html/docker/8.4/migrate-sqlite-to-postgres.py --indexes-only
 """
 
 import csv
@@ -25,6 +32,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 from collections import defaultdict
 from datetime import datetime
 
@@ -346,6 +354,77 @@ def create_unique_indexes(conn: sqlite3.Connection) -> None:
     log(f"Created {created} unique constraint(s) from SQLite schema.")
 
 
+def create_regular_indexes(conn: sqlite3.Connection) -> None:
+    """Recreate non-unique indexes in Postgres from SQLite's PRAGMA index_list.
+
+    Covers every index created with CREATE INDEX (origin 'c') that is not unique,
+    i.e. everything $table->index() and ->morphs() produced while the install was
+    on SQLite. Unique indexes and primary
+    keys are handled by create_unique_indexes() and the schema step.
+
+    Uses CREATE INDEX IF NOT EXISTS with the original index name, so:
+      - post-import migrations calling $table->dropIndex('name') find the index, and
+      - re-running (e.g. with --indexes-only) is safe and only creates missing ones.
+
+    Expression and partial indexes are skipped with a warning because their SQLite
+    definitions are not guaranteed to be valid Postgres SQL.
+    """
+    table_names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+
+    existing = set(
+        run_psql("COPY (SELECT indexname FROM pg_indexes WHERE schemaname = 'public') TO STDOUT").split()
+    )
+
+    created = 0
+    present = 0
+    skipped = 0
+    for table_name in table_names:
+        indexes = conn.execute(f"PRAGMA index_list('{table_name}')").fetchall()
+        for idx in indexes:
+            # PRAGMA index_list cols: seq, name, unique, origin, partial
+            idx_name = idx[1]
+            is_unique = idx[2]
+            origin = idx[3]
+            is_partial = idx[4]
+
+            if is_unique or origin != "c":
+                continue
+
+            # Postgres truncates identifiers to 63 bytes (NAMEDATALEN - 1).
+            if idx_name[:63] in existing:
+                present += 1
+                continue
+
+            if is_partial:
+                log(f"  Skipping partial index {idx_name} on {table_name} (recreate manually if needed)")
+                skipped += 1
+                continue
+
+            # PRAGMA index_xinfo cols: seqno, cid, name, desc, coll, key
+            key_cols = [c for c in conn.execute(f"PRAGMA index_xinfo('{idx_name}')").fetchall() if c[5]]
+            if not key_cols:
+                continue
+            if any(c[1] == -2 for c in key_cols):
+                log(f"  Skipping expression index {idx_name} on {table_name} (recreate manually if needed)")
+                skipped += 1
+                continue
+
+            col_sql = ", ".join(f'"{c[2]}"' + (" DESC" if c[3] else "") for c in key_cols)
+            try:
+                run_psql(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON "{table_name}" ({col_sql})')
+                created += 1
+            except RuntimeError as e:
+                log(f"  Warning: could not create index {idx_name} on {table_name}: {e}")
+
+    log(f"Created {created} regular index(es) from SQLite schema ({present} already present, {skipped} skipped).")
+
+
 def create_foreign_keys(conn: sqlite3.Connection) -> None:
     """Create FK constraints in Postgres from SQLite's PRAGMA foreign_key_list.
 
@@ -536,7 +615,23 @@ def reset_sequences() -> None:
     """)
 
 
+def restore_indexes_only() -> None:
+    """Create missing regular indexes on an already-migrated database. Imports no data."""
+    if not os.path.isfile(SQLITE_DB):
+        log(f"SQLite database not found at {SQLITE_DB}. Nothing to restore from.")
+        sys.exit(1)
+
+    conn = sqlite3.connect(f"file:{SQLITE_DB}?mode=ro", uri=True)
+    log(f"Restoring regular indexes from {SQLITE_DB} (no data is changed)...")
+    create_regular_indexes(conn)
+    conn.close()
+
+
 def main() -> None:
+    if "--indexes-only" in sys.argv[1:]:
+        restore_indexes_only()
+        return
+
     drop_all_tables()
 
     conn = sqlite3.connect(SQLITE_DB)
@@ -577,6 +672,9 @@ def main() -> None:
 
     log("Creating foreign key constraints from SQLite schema...")
     create_foreign_keys(conn)
+
+    log("Creating regular indexes from SQLite schema...")
+    create_regular_indexes(conn)
 
     conn.close()
 

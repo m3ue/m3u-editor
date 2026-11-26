@@ -49,8 +49,8 @@ cp "${SQLITE_DB}" "${BACKUP_DIR}/database.sqlite.${BACKUP_TS}.bak"
 log "Backup created: ${BACKUP_DIR}/database.sqlite.${BACKUP_TS}.bak"
 
 # Step 3: Run the Python migration script (drop Postgres tables, recreate from SQLite PRAGMA,
-# import all data including the migrations table, create unique indexes and FK constraints,
-# remove pgsql-only migration records so they re-run, reset sequences).
+# import all data including the migrations table, create unique indexes, FK constraints and
+# regular indexes, remove pgsql-only migration records so they re-run, reset sequences).
 MIGRATION_LOG_FILE="${MIGRATION_LOG_FILE}" \
     python3 "${MIGRATION_SCRIPT_DIR}/migrate-sqlite-to-postgres.py"
 
