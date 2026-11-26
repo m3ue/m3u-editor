@@ -354,6 +354,10 @@ class ProfileService
                 // sees the updated count and picks a different profile (or waits).
                 static::incrementConnections($profile, $reservationId);
 
+                if ($redirectService) {
+                    $redirectService->recordProxyStream($profile, $reservationId);
+                }
+
                 // Mark this channel as having a pending reservation (short TTL so
                 // it self-expires if stream creation fails before finalizeReservation).
                 if ($channelId !== null && $channelPlaylistUuid !== null) {

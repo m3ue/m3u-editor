@@ -53,6 +53,11 @@ class ProviderProfileRedirectService
     protected const ASSIGNMENT_RETENTION_SECONDS = 86400;
 
     /**
+     * Assignment key prefix for streams the proxy started (see recordProxyStream()).
+     */
+    protected const PROXY_STREAM_MEMBER_PREFIX = 'proxy:';
+
+    /**
      * Timeout for each provider player_api poll (seconds).
      */
     protected const POLL_TIMEOUT_SECONDS = 3;
@@ -200,15 +205,32 @@ class ProviderProfileRedirectService
         if ($playlist->pollsProviderForProfileRedirect()) {
             $cacheSeconds = max(1, (int) $playlist->profiles_redirect_cache_seconds);
 
-            return $profiles
+            $counts = $profiles
                 ->mapWithKeys(fn (PlaylistProfile $profile): array => [
                     (string) $profile->id => $pollProvider
                         ? $this->providerActiveConnections($profile, $cacheSeconds)
                         : $this->cachedProviderActiveConnections($profile),
                 ])
                 ->all();
+
+            // Without polling, accounts with no cached provider count are estimated
+            // in counting mode, starting from m3u-proxy's count of proxied streams.
+            $unpolled = $profiles->filter(fn (PlaylistProfile $profile): bool => $counts[(string) $profile->id] === null);
+
+            return $unpolled->isEmpty() ? $counts : array_replace($counts, $this->proxyBaseCounts($unpolled));
         }
 
+        return $this->proxyBaseCounts($profiles);
+    }
+
+    /**
+     * m3u-proxy's active stream count per profile, in the base count shape.
+     *
+     * @param  Collection<int, PlaylistProfile>  $profiles
+     * @return array<string, array{count: int, polled_at: null}>
+     */
+    protected function proxyBaseCounts(Collection $profiles): array
+    {
         $profileIds = $profiles->pluck('id')->map(fn ($id): string => (string) $id)->all();
         $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
 
@@ -269,7 +291,13 @@ class ProviderProfileRedirectService
                 continue;
             }
 
-            $heldByOthers = count(array_filter($others, fn (int $assignedAt): bool => $assignedAt > $now - $holdSeconds));
+            // Proxied streams are already in m3u-proxy's count.
+            $redirectedOthers = array_filter(
+                $others,
+                fn (string $client): bool => ! str_starts_with($client, static::PROXY_STREAM_MEMBER_PREFIX),
+                ARRAY_FILTER_USE_KEY,
+            );
+            $heldByOthers = count(array_filter($redirectedOthers, fn (int $assignedAt): bool => $assignedAt > $now - $holdSeconds));
             $counts[$key] = (int) ($baseCount ?? 0) + $heldByOthers;
         }
 
@@ -378,6 +406,29 @@ class ProviderProfileRedirectService
             $this->pruneAssignments($profile, $now - $retention);
         } catch (\Throwable $e) {
             Log::warning('Failed to record redirect profile assignment', [
+                'profile_id' => $profile->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Record that the proxy started a stream on a profile of a Redirect-mode playlist
+     * (DVR, the in-app player). The marker makes it the latest assignment on that
+     * account, so an earlier redirected client is no longer assumed to be replacing
+     * its own stream there. m3u-proxy already counts the stream itself, so counting
+     * mode ignores markers; polling mode counts them only until the provider reports
+     * the connection.
+     */
+    public function recordProxyStream(PlaylistProfile $profile, string $streamKey): void
+    {
+        $key = static::assignmentsKey($profile);
+
+        try {
+            Redis::hset($key, static::PROXY_STREAM_MEMBER_PREFIX.$streamKey, now()->getTimestamp());
+            Redis::expire($key, static::ASSIGNMENT_RETENTION_SECONDS);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to record proxied stream for redirect profile', [
                 'profile_id' => $profile->id,
                 'exception' => $e->getMessage(),
             ]);

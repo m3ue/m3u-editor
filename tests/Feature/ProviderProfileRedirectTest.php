@@ -279,3 +279,35 @@ test('Proxy mode playlists are untouched by the redirect service', function () {
         ->and(profileRedirectService()->assignProfile($playlist, '10.0.0.1:alice'))->toBeNull()
         ->and(ProfileService::buildClientIdentifier('10.0.0.1', 'alice'))->toBe('10.0.0.1:alice');
 });
+
+test('polling mode does not replace a client\'s stream after the proxy started one on that account', function () {
+    $playlist = profileRedirectPlaylist($this->user, ['main'], ['profiles_redirect_poll_provider' => true]);
+    profileRedirectFakeActiveCons(['main' => 0]);
+    profileRedirectService()->assignProfile($playlist, '10.0.0.1:alice');
+
+    // Alice stopped; a DVR recording then starts on the same account through the proxy.
+    $this->travel(5)->minutes();
+    Cache::flush();
+    [$profile, $reservationId] = ProfileService::selectAndReserveProfile($playlist);
+    expect($profile?->username)->toBe('main');
+    ProfileService::finalizeReservation($profile, $reservationId, 'dvr-stream');
+
+    // The provider now reports the recording. Alice's old redirect is not that stream.
+    $this->travel(1)->minutes();
+    Cache::flush();
+    profileRedirectFakeActiveCons(['main' => 1]);
+
+    expect(profileRedirectService()->assignProfile($playlist, '10.0.0.1:alice'))->toBeNull();
+});
+
+test('pool status for an account not polled yet starts from the proxy count', function () {
+    $playlist = profileRedirectPlaylist($this->user, ['main'], ['profiles_redirect_poll_provider' => true]);
+    $profileId = (string) $playlist->enabledProfiles()->first()->id;
+
+    Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response(['counts' => [$profileId => 1]]),
+    ]);
+
+    expect(ProfileService::getPoolStatus($playlist)['total_active'])->toBe(1);
+    Http::assertNotSent(fn (HttpRequest $request): bool => str_contains($request->url(), 'player_api.php'));
+});
