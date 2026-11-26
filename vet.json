@@ -578,20 +578,20 @@
             "hash": "tree-v2:2e397f0139c07726cb4019ea6ce6c26cc7fb9b5232635e7e65e0ca4270be232a"
         },
         "symfony/html-sanitizer": {
-            "version": "v8.1.11",
-            "hash": "tree-v2:a745b9742685d9b2f5e067151183db2e8c42c3f35659a8cec451233b912adcf8"
+            "version": "v8.1.12",
+            "hash": "tree-v2:0109e4c8daeff4e0b73ceaec0babe8927d3aab8f1a6b0d2a55765cd64007fd45"
         },
         "symfony/http-foundation": {
-            "version": "v8.1.11",
-            "hash": "tree-v2:eb7e195ea55862fe686348a0a2db3b9e0927a4dd2cd9589c567d2a3712a0418c"
+            "version": "v8.1.12",
+            "hash": "tree-v2:0c68701b993e39ca2a3c77a9e761ea296e125e77a92e81c1715c7091b79df637"
         },
         "symfony/http-kernel": {
-            "version": "v8.1.11",
-            "hash": "tree-v2:f711f3963c9952dc91d9c8a07058f4a084ccb9a8b55c0165adb14153d5ea03e9"
+            "version": "v8.1.12",
+            "hash": "tree-v2:703764d24ce6af8c63b2d176a5ce1079741b0122a8f339a08a16c1d11ee55b5d"
         },
         "symfony/mailer": {
-            "version": "v8.1.10",
-            "hash": "tree-v2:891554870a256d8e976fdbe6f5c254690a3540125a1ec9f92e3cd72b42dcb010"
+            "version": "v8.1.12",
+            "hash": "tree-v2:276dee2e9e2465237814ef89ccb140462181725ddb35c06f5876942ff94a1dd4"
         },
         "symfony/mime": {
             "version": "v8.1.10",
@@ -654,8 +654,8 @@
             "hash": "tree-v2:cddfd9154ad642312b83da86af1e1fea3a6b0319445321212c0d02ae1c3e3b78"
         },
         "symfony/routing": {
-            "version": "v8.1.11",
-            "hash": "tree-v2:22d80c8e8728c2b6d65c743b252b3ab3293b7555c3d1687c7ee63cbe6695c10a"
+            "version": "v8.1.12",
+            "hash": "tree-v2:8fbdb3a403f026978046ab169bf91dac914e6f62b976d3cdb5f533627e93b4c9"
         },
         "symfony/service-contracts": {
             "version": "v3.8.1",

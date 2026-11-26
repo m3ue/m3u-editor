@@ -100,6 +100,9 @@ return [
             'symfony/html-sanitizer',
             'symfony/routing',
             'symfony/yaml',
+            // v8.1.12 was the security patch for CVE-2026-133751 and CVE-2026-133755
+            // (require_tls bypass and STARTTLS reply injection by a man in the middle)
+            'symfony/mailer',
             // ── Well-known, widely-audited ecosystem packages ────────────────
             'league/flysystem',
             'vlucas/phpdotenv',
