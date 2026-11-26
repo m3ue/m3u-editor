@@ -283,11 +283,15 @@ class ProfileService
         $candidateProfiles = $playlist->enabledProfiles()
             ->when($excludeProfileId, fn ($query) => $query->where('id', '!=', $excludeProfileId));
 
+        $redirectService = null;
+
         if ($playlist->usesProfileRedirect()) {
             // Redirect mode: redirected streams never reach m3u-proxy, so the proxy's
-            // own counts would miss them. Use the same counts Redirect mode uses.
-            $proxyCounts = app(ProviderProfileRedirectService::class)
-                ->countsForProxySelection($playlist, $candidateProfiles->get());
+            // own counts would miss them. Use the same counts Redirect mode uses: the
+            // network part here, the redirect assignments inside the lock below.
+            $redirectService = app(ProviderProfileRedirectService::class);
+            $redirectProfiles = $candidateProfiles->get();
+            $redirectBaseCounts = $redirectService->fetchBaseCounts($playlist, $redirectProfiles);
         } else {
             $profileIds = $candidateProfiles
                 ->pluck('id')
@@ -339,6 +343,10 @@ class ProfileService
             }
 
             // Inside the lock: select + increment atomically
+            if ($redirectService) {
+                $proxyCounts = $redirectService->connectionCounts($playlist, $redirectProfiles, $redirectBaseCounts, null);
+            }
+
             $profile = static::selectProfile($playlist, $excludeProfileId, $forceSelect, $clientIdentifier, $proxyCounts);
 
             if ($profile) {
@@ -636,8 +644,14 @@ class ProfileService
 
         return Cache::remember("pool_status_{$playlist->id}", 5, function () use ($playlist) {
             $allProfiles = $playlist->profiles()->get();
-            $profileIds = $allProfiles->pluck('id')->map(fn ($id) => (string) $id)->all();
-            $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+
+            if ($playlist->usesProfileRedirect()) {
+                // Redirected streams never reach m3u-proxy; count them the way Redirect mode does.
+                $proxyCounts = app(ProviderProfileRedirectService::class)->poolStatusCounts($playlist, $allProfiles);
+            } else {
+                $profileIds = $allProfiles->pluck('id')->map(fn ($id) => (string) $id)->all();
+                $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+            }
 
             $profiles = [];
             $totalCapacity = 0;

@@ -22,8 +22,8 @@ use Illuminate\Support\Facades\Redis;
  * stream ends. Two ways of counting busy slots make up for that:
  *
  * - Polling (Xtream only): ask each account's player_api for active_cons, cached
- *   for profiles_redirect_cache_seconds. Redirects handed out in the last
- *   few seconds (before the provider reports them) are added on top.
+ *   for profiles_redirect_cache_seconds. Redirects handed out after that count
+ *   was taken (or just before it, while the provider catches up) are added on top.
  * - Counting: every redirect occupies a slot for profiles_redirect_hold_seconds.
  *
  * In both modes a client (IP + username) holds at most one slot per playlist: a
@@ -33,11 +33,18 @@ use Illuminate\Support\Facades\Redis;
 class ProviderProfileRedirectService
 {
     /**
-     * Polling mode: how long (beyond the provider count cache) a freshly handed-out
-     * redirect is still counted locally, covering the gap before the provider's
-     * active_cons includes it.
+     * Polling mode: how long a provider may take to include a new connection in
+     * active_cons. Redirects handed out up to this long before a poll are still
+     * counted locally on top of that poll's count.
      */
-    public const POLL_CONNECT_GRACE_SECONDS = 30;
+    public const PROVIDER_REPORT_LAG_SECONDS = 15;
+
+    /**
+     * Polling mode: a client's own earlier redirect is treated as its stream that a
+     * new request replaces only while it is this recent. Older assignments may have
+     * ended long ago, and the provider's count then belongs to someone else.
+     */
+    public const OWN_STREAM_REPLACE_WINDOW_SECONDS = 1800;
 
     /**
      * How long a client's assignment is remembered for the "same client replaces
@@ -132,6 +139,7 @@ class ProviderProfileRedirectService
         }
 
         try {
+            // Assignments are read inside the lock so concurrent selections see each other.
             $counts = $this->connectionCounts($playlist, $profiles, $baseCounts, $clientIdentifier);
 
             $profile = ProfileService::selectProfile(
@@ -164,55 +172,69 @@ class ProviderProfileRedirectService
     }
 
     /**
-     * Connection counts for the proxy path of a Redirect-mode playlist (DVR, the
-     * in-app player and channels with the proxy forced on still go through
-     * m3u-proxy), so proxied and redirected streams share one view of the pool.
+     * Busy-slot counts for showing pool status. Never polls the provider (this runs
+     * while a page renders): accounts without a cached provider count are shown
+     * with counting-mode estimates.
      *
      * @param  Collection<int, PlaylistProfile>  $profiles
      * @return array<string, int>
      */
-    public function countsForProxySelection(Playlist $playlist, Collection $profiles): array
+    public function poolStatusCounts(Playlist $playlist, Collection $profiles): array
     {
-        return $this->connectionCounts($playlist, $profiles, $this->fetchBaseCounts($playlist, $profiles), null);
+        return $this->connectionCounts($playlist, $profiles, $this->fetchBaseCounts($playlist, $profiles, pollProvider: false), null);
     }
 
     /**
-     * Counts that need a network call: the provider's active_cons per profile in
-     * polling mode, or m3u-proxy's active streams per profile in counting mode.
-     * A null entry means the provider could not be polled.
+     * Counts that need a network call: the provider's active_cons per profile (with
+     * the time it was polled) in polling mode, or m3u-proxy's active streams per
+     * profile in counting mode. A null count means the provider could not be polled.
+     *
+     * Call this before taking the selection lock, then pass the result to
+     * connectionCounts() inside the lock.
      *
      * @param  Collection<int, PlaylistProfile>  $profiles
-     * @return array<string, int|null>
+     * @return array<string, array{count: int|null, polled_at: int|null}>
      */
-    public function fetchBaseCounts(Playlist $playlist, Collection $profiles): array
+    public function fetchBaseCounts(Playlist $playlist, Collection $profiles, bool $pollProvider = true): array
     {
         if ($playlist->pollsProviderForProfileRedirect()) {
             $cacheSeconds = max(1, (int) $playlist->profiles_redirect_cache_seconds);
 
             return $profiles
                 ->mapWithKeys(fn (PlaylistProfile $profile): array => [
-                    (string) $profile->id => $this->providerActiveConnections($profile, $cacheSeconds),
+                    (string) $profile->id => $pollProvider
+                        ? $this->providerActiveConnections($profile, $cacheSeconds)
+                        : $this->cachedProviderActiveConnections($profile),
                 ])
                 ->all();
         }
 
         $profileIds = $profiles->pluck('id')->map(fn ($id): string => (string) $id)->all();
+        $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
 
-        return array_map('intval', M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds));
+        return collect($profileIds)
+            ->mapWithKeys(fn (string $id): array => [
+                $id => ['count' => (int) ($proxyCounts[$id] ?? 0), 'polled_at' => null],
+            ])
+            ->all();
     }
 
     /**
-     * Combine the network counts with the locally recorded redirects.
+     * Combine the network counts with the locally recorded redirects. Reads Redis
+     * only, so it is safe to call inside the selection lock.
      *
-     * Polling: provider active_cons + other clients' redirects from the last few
-     * seconds. When this client was the most recent one sent to a profile, its old
-     * stream (still in active_cons) is about to be replaced, so it is not counted.
-     * If a provider poll failed, that profile falls back to counting mode.
+     * Polling: provider active_cons + other clients' redirects the provider cannot
+     * have reported yet (handed out after the poll, or within
+     * PROVIDER_REPORT_LAG_SECONDS before it). The client's own stream is not counted
+     * when it is about to be replaced: the client was the latest one sent to this
+     * account, recently enough that the stream is probably still running, and early
+     * enough that the poll already includes it. If a provider poll failed, that
+     * profile falls back to counting mode.
      *
      * Counting: proxied streams + other clients' redirects within the hold period.
      *
      * @param  Collection<int, PlaylistProfile>  $profiles
-     * @param  array<string, int|null>  $baseCounts
+     * @param  array<string, array{count: int|null, polled_at: int|null}>  $baseCounts
      * @return array<string, int>
      */
     public function connectionCounts(Playlist $playlist, Collection $profiles, array $baseCounts, ?string $clientIdentifier): array
@@ -220,7 +242,6 @@ class ProviderProfileRedirectService
         $now = now()->getTimestamp();
         $polling = $playlist->pollsProviderForProfileRedirect();
         $holdSeconds = max(1, (int) $playlist->profiles_redirect_hold_seconds);
-        $graceSeconds = max(1, (int) $playlist->profiles_redirect_cache_seconds) + static::POLL_CONNECT_GRACE_SECONDS;
         $counts = [];
 
         foreach ($profiles as $profile) {
@@ -231,39 +252,68 @@ class ProviderProfileRedirectService
                 fn (string $client): bool => $client !== $clientIdentifier,
                 ARRAY_FILTER_USE_KEY,
             );
-            $providerCount = $baseCounts[$key] ?? null;
+            $baseCount = $baseCounts[$key]['count'] ?? null;
+            $polledAt = $baseCounts[$key]['polled_at'] ?? null;
 
-            if ($polling && $providerCount !== null) {
-                $recentOthers = count(array_filter($others, fn (int $assignedAt): bool => $assignedAt > $now - $graceSeconds));
-                $replacesOwnStream = $clientIdentifier !== null
-                    && isset($assignments[$clientIdentifier])
-                    && $assignments[$clientIdentifier] >= max([0, ...array_values($others)]);
+            if ($polling && $baseCount !== null && $polledAt !== null) {
+                $notYetReported = $polledAt - static::PROVIDER_REPORT_LAG_SECONDS;
+                $recentOthers = count(array_filter($others, fn (int $assignedAt): bool => $assignedAt > $notYetReported));
+                $ownAssignedAt = $clientIdentifier !== null ? ($assignments[$clientIdentifier] ?? null) : null;
+                $replacesOwnStream = $ownAssignedAt !== null
+                    && $ownAssignedAt > $now - static::OWN_STREAM_REPLACE_WINDOW_SECONDS
+                    && $ownAssignedAt <= $notYetReported
+                    && $ownAssignedAt >= max([0, ...array_values($others)]);
 
-                $counts[$key] = max(0, $providerCount - ($replacesOwnStream ? 1 : 0)) + $recentOthers;
+                $counts[$key] = max(0, $baseCount - ($replacesOwnStream ? 1 : 0)) + $recentOthers;
 
                 continue;
             }
 
             $heldByOthers = count(array_filter($others, fn (int $assignedAt): bool => $assignedAt > $now - $holdSeconds));
-            $counts[$key] = (int) ($providerCount ?? 0) + $heldByOthers;
+            $counts[$key] = (int) ($baseCount ?? 0) + $heldByOthers;
         }
 
         return $counts;
     }
 
     /**
-     * The provider's reported active connections for a profile, cached for the
-     * playlist's configured window. Null when the provider could not be polled.
+     * The provider's reported active connections for a profile and when they were
+     * polled, cached for the playlist's configured window. A failed poll is cached
+     * too (with a null count), so a provider that is down costs one timeout per
+     * window instead of one per request; until the next poll the profile is counted
+     * locally.
+     *
+     * @return array{count: int|null, polled_at: int}
      */
-    public function providerActiveConnections(PlaylistProfile $profile, int $cacheSeconds): ?int
+    public function providerActiveConnections(PlaylistProfile $profile, int $cacheSeconds): array
     {
-        $cacheKey = "profile_redirect_active_cons:{$profile->id}";
-        $cached = Cache::get($cacheKey);
-
-        if (is_int($cached)) {
+        if ($cached = $this->cachedProviderActiveConnections($profile)) {
             return $cached;
         }
 
+        $result = ['count' => $this->pollProviderActiveConnections($profile), 'polled_at' => now()->getTimestamp()];
+        Cache::put(static::providerCountCacheKey($profile), $result, $cacheSeconds);
+
+        return $result;
+    }
+
+    /**
+     * The cached provider count for a profile, or null when none is cached.
+     *
+     * @return array{count: int|null, polled_at: int}|null
+     */
+    protected function cachedProviderActiveConnections(PlaylistProfile $profile): ?array
+    {
+        $cached = Cache::get(static::providerCountCacheKey($profile));
+
+        return is_array($cached) && array_key_exists('count', $cached) ? $cached : null;
+    }
+
+    /**
+     * Ask the provider for the profile's active connections. Null on failure.
+     */
+    protected function pollProviderActiveConnections(PlaylistProfile $profile): ?int
+    {
         $xtreamConfig = $profile->xtream_config;
 
         if (! $xtreamConfig) {
@@ -293,10 +343,12 @@ class ProviderProfileRedirectService
             return null;
         }
 
-        $activeConnections = (int) $activeConnections;
-        Cache::put($cacheKey, $activeConnections, $cacheSeconds);
+        return (int) $activeConnections;
+    }
 
-        return $activeConnections;
+    protected static function providerCountCacheKey(PlaylistProfile $profile): string
+    {
+        return "profile_redirect_active_cons:{$profile->id}";
     }
 
     /**

@@ -210,7 +210,10 @@ class PlaylistInfo extends Component
     {
         $poolStatus = ProfileService::getPoolStatus($playlist);
         $maxConnections = $poolStatus['total_capacity'];
-        $activeConnections = M3uProxyService::getPlaylistActiveStreamsCount($playlist);
+        // Redirected streams never reach m3u-proxy, so Redirect mode uses the pool's own counts.
+        $activeConnections = $playlist->usesProfileRedirect()
+            ? $poolStatus['total_active']
+            : M3uProxyService::getPlaylistActiveStreamsCount($playlist);
 
         // Get earliest expiration from any profile
         $expires = null;
