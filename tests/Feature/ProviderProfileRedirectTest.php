@@ -243,7 +243,8 @@ test('polling mode caches a failed poll instead of retrying it on every request'
     expect(profileRedirectService()->assignProfile($playlist, '10.0.0.1:alice')?->username)->toBe('main')
         ->and(profileRedirectService()->assignProfile($playlist, '10.0.0.2:bob'))->toBeNull();
 
-    Http::assertSentCount(1);
+    // One provider poll; the m3u-proxy count for the failed account is a local call.
+    expect(Http::recorded(fn (HttpRequest $request): bool => str_contains($request->url(), 'player_api.php')))->toHaveCount(1);
 });
 
 test('polling mode does not count a redirect twice once the provider reports it', function () {
@@ -310,4 +311,28 @@ test('pool status for an account not polled yet starts from the proxy count', fu
 
     expect(ProfileService::getPoolStatus($playlist)['total_active'])->toBe(1);
     Http::assertNotSent(fn (HttpRequest $request): bool => str_contains($request->url(), 'player_api.php'));
+});
+
+test('polling mode counts proxied streams on an account whose poll failed', function () {
+    $playlist = profileRedirectPlaylist($this->user, ['main'], ['profiles_redirect_poll_provider' => true]);
+    $profileId = (string) $playlist->enabledProfiles()->first()->id;
+
+    // A DVR recording holds the account through the proxy, and the provider is down.
+    Http::fake(fn (HttpRequest $request) => str_contains($request->url(), '/streams/counts-by-metadata')
+        ? Http::response(['counts' => [$profileId => 1]])
+        : Http::response('', 500));
+
+    expect(profileRedirectService()->assignProfile($playlist, '10.0.0.1:alice'))->toBeNull();
+});
+
+test('recording proxied streams prunes expired markers', function () {
+    $playlist = profileRedirectPlaylist($this->user, ['main']);
+    $profile = $playlist->enabledProfiles()->first();
+
+    profileRedirectService()->recordProxyStream($profile, 'old-stream');
+    $this->travel(25)->hours();
+    profileRedirectService()->recordProxyStream($profile, 'new-stream');
+
+    expect(array_keys(Redis::hgetall(ProviderProfileRedirectService::assignmentsKey($profile))))
+        ->toBe(['proxy:new-stream']);
 });

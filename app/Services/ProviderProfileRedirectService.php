@@ -213,9 +213,10 @@ class ProviderProfileRedirectService
                 ])
                 ->all();
 
-            // Without polling, accounts with no cached provider count are estimated
-            // in counting mode, starting from m3u-proxy's count of proxied streams.
-            $unpolled = $profiles->filter(fn (PlaylistProfile $profile): bool => $counts[(string) $profile->id] === null);
+            // Accounts without a provider count (not polled yet when not polling, or a
+            // failed poll) are estimated in counting mode, starting from m3u-proxy's
+            // count of proxied streams.
+            $unpolled = $profiles->filter(fn (PlaylistProfile $profile): bool => ($counts[(string) $profile->id]['count'] ?? null) === null);
 
             return $unpolled->isEmpty() ? $counts : array_replace($counts, $this->proxyBaseCounts($unpolled));
         }
@@ -425,8 +426,12 @@ class ProviderProfileRedirectService
         $key = static::assignmentsKey($profile);
 
         try {
-            Redis::hset($key, static::PROXY_STREAM_MEMBER_PREFIX.$streamKey, now()->getTimestamp());
+            $now = now()->getTimestamp();
+            Redis::hset($key, static::PROXY_STREAM_MEMBER_PREFIX.$streamKey, $now);
             Redis::expire($key, static::ASSIGNMENT_RETENTION_SECONDS);
+
+            // Keep the hash bounded on playlists where most streams go through the proxy.
+            $this->pruneAssignments($profile, $now - static::ASSIGNMENT_RETENTION_SECONDS);
         } catch (\Throwable $e) {
             Log::warning('Failed to record proxied stream for redirect profile', [
                 'profile_id' => $profile->id,
