@@ -12,17 +12,21 @@ Flow:
      which migrations were already applied and only runs new ones.
   4. Create unique indexes and FK constraints from SQLite's PRAGMA metadata so that
      post-import migrations which drop-then-recreate constraints can find them.
-  5. Recreate regular (non-unique) indexes from SQLite's PRAGMA metadata. Without
+  5. Convert json() columns from text to jsonb.
+  6. Recreate regular (non-unique) indexes from SQLite's PRAGMA metadata. Without
      these, every index added by a Laravel migration before the import is lost, and
-     later migrations that drop one of them by name cannot find it.
-  6. Reset sequences.
+     later migrations that drop one of them by name cannot find it. Runs after step 5
+     because each jsonb conversion rewrites the table and rebuilds its indexes.
+  7. Reset sequences.
   (db-init.sh runs `php artisan migrate` afterwards to apply new migrations.)
 
 Run manually inside the container:
   python3 /var/www/html/docker/8.4/migrate-sqlite-to-postgres.py
 
 Restore only the missing regular indexes on an install that was already migrated
-(reads the SQLite file, creates nothing that already exists, imports no data):
+(reads the SQLite file, creates nothing that already exists, imports no data, and
+builds indexes CONCURRENTLY so a running install is not blocked). Warnings about
+columns or tables that later migrations renamed or dropped are expected:
   python3 /var/www/html/docker/8.4/migrate-sqlite-to-postgres.py --indexes-only
 """
 
@@ -305,6 +309,30 @@ def copy_table(conn: sqlite3.Connection, table_name: str, columns: list, bool_co
     return row_count
 
 
+def _partial_index_sql(conn: sqlite3.Connection, idx_name: str, concurrent: bool = False) -> str | None:
+    """Return the original CREATE [UNIQUE] INDEX ... WHERE statement for a partial index.
+
+    The app creates partial indexes with raw DB::statement() SQL that is identical on
+    SQLite and Postgres (e.g. media_requests_active_unique), so the statement stored in
+    sqlite_master can be replayed. IF NOT EXISTS (and CONCURRENTLY when requested) is
+    added so re-runs are safe.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?", (idx_name,)
+    ).fetchone()
+    if not row or not row[0]:
+        return None
+    sql, n = re.subn(
+        r"^\s*CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?",
+        lambda m: "CREATE " + ("UNIQUE " if m.group(1) else "") + "INDEX "
+        + ("CONCURRENTLY " if concurrent else "") + "IF NOT EXISTS ",
+        row[0],
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return sql if n else None
+
+
 def create_unique_indexes(conn: sqlite3.Connection) -> None:
     """Create unique constraints in Postgres from SQLite's PRAGMA index_list.
 
@@ -312,6 +340,11 @@ def create_unique_indexes(conn: sqlite3.Connection) -> None:
     Laravel migrations calling $table->dropUnique() — which generates ALTER TABLE
     DROP CONSTRAINT — can find and remove them. CREATE UNIQUE INDEX produces a
     plain index, which DROP CONSTRAINT cannot see.
+
+    Partial unique indexes (CREATE UNIQUE INDEX ... WHERE ...) cannot be expressed as
+    a constraint, so their original statement is replayed instead. Creating them as a
+    full UNIQUE constraint would enforce uniqueness on rows the index was meant to
+    ignore (e.g. completed or rejected media requests).
 
     Called after COPY so the import doesn't fight constraints, but before php artisan
     migrate runs so ON CONFLICT clauses and dropUnique() calls both work correctly.
@@ -333,8 +366,21 @@ def create_unique_indexes(conn: sqlite3.Connection) -> None:
             idx_name = idx[1]
             is_unique = idx[2]
             origin = idx[3]  # 'c'=CREATE INDEX, 'u'=UNIQUE constraint, 'pk'=primary key
+            is_partial = idx[4]
 
             if not is_unique or origin == "pk":
+                continue
+
+            if is_partial:
+                sql = _partial_index_sql(conn, idx_name)
+                if not sql:
+                    log(f"  Skipping partial unique index {idx_name} on {table_name} (no stored definition)")
+                    continue
+                try:
+                    run_psql(sql)
+                    created += 1
+                except RuntimeError as e:
+                    log(f"  Warning: could not create partial unique index {idx_name} on {table_name}: {e}")
                 continue
 
             # PRAGMA index_info cols: seqno, cid, name
@@ -354,7 +400,24 @@ def create_unique_indexes(conn: sqlite3.Connection) -> None:
     log(f"Created {created} unique constraint(s) from SQLite schema.")
 
 
-def create_regular_indexes(conn: sqlite3.Connection) -> None:
+def _pg_index_names(valid: bool) -> set:
+    """Names of valid (or invalid) indexes in the public schema."""
+    flag = "" if valid else "NOT "
+    out = run_psql(
+        "COPY (SELECT c.relname FROM pg_index i "
+        "JOIN pg_class c ON c.oid = i.indexrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        f"WHERE n.nspname = 'public' AND {flag}i.indisvalid) TO STDOUT"
+    )
+    return set(out.split())
+
+
+def _drop_invalid_index(name: str, concurrent: bool) -> None:
+    """Drop an index left INVALID by an interrupted or failed CREATE INDEX CONCURRENTLY."""
+    run_psql(f'DROP INDEX {"CONCURRENTLY " if concurrent else ""}IF EXISTS "{name}"')
+
+
+def create_regular_indexes(conn: sqlite3.Connection, concurrent: bool = False) -> None:
     """Recreate non-unique indexes in Postgres from SQLite's PRAGMA index_list.
 
     Covers every index created with CREATE INDEX (origin 'c') that is not unique,
@@ -366,8 +429,14 @@ def create_regular_indexes(conn: sqlite3.Connection) -> None:
       - post-import migrations calling $table->dropIndex('name') find the index, and
       - re-running (e.g. with --indexes-only) is safe and only creates missing ones.
 
-    Expression and partial indexes are skipped with a warning because their SQLite
-    definitions are not guaranteed to be valid Postgres SQL.
+    With concurrent=True (used by --indexes-only on a running install) indexes are
+    built with CREATE INDEX CONCURRENTLY so import and sync jobs can keep writing to
+    the table. An index left INVALID by an interrupted concurrent build is dropped
+    and rebuilt rather than counted as present.
+
+    Partial indexes are recreated by replaying their original SQL. Expression indexes
+    are skipped with a warning because their SQLite definitions are not guaranteed to
+    be valid Postgres SQL.
     """
     table_names = [
         row[0]
@@ -377,13 +446,14 @@ def create_regular_indexes(conn: sqlite3.Connection) -> None:
         )
     ]
 
-    existing = set(
-        run_psql("COPY (SELECT indexname FROM pg_indexes WHERE schemaname = 'public') TO STDOUT").split()
-    )
+    existing = _pg_index_names(valid=True)
+    invalid = _pg_index_names(valid=False)
+    create = "CREATE INDEX CONCURRENTLY IF NOT EXISTS" if concurrent else "CREATE INDEX IF NOT EXISTS"
 
     created = 0
     present = 0
     skipped = 0
+    failed = 0
     for table_name in table_names:
         indexes = conn.execute(f"PRAGMA index_list('{table_name}')").fetchall()
         for idx in indexes:
@@ -397,32 +467,54 @@ def create_regular_indexes(conn: sqlite3.Connection) -> None:
                 continue
 
             # Postgres truncates identifiers to 63 bytes (NAMEDATALEN - 1).
-            if idx_name[:63] in existing:
+            pg_name = idx_name[:63]
+            if pg_name in existing:
                 present += 1
                 continue
 
             if is_partial:
-                log(f"  Skipping partial index {idx_name} on {table_name} (recreate manually if needed)")
-                skipped += 1
-                continue
+                sql = _partial_index_sql(conn, idx_name, concurrent)
+                if not sql:
+                    log(f"  Skipping partial index {idx_name} on {table_name} (no stored definition)")
+                    skipped += 1
+                    continue
+            else:
+                # PRAGMA index_xinfo cols: seqno, cid, name, desc, coll, key
+                key_cols = [c for c in conn.execute(f"PRAGMA index_xinfo('{idx_name}')").fetchall() if c[5]]
+                if not key_cols:
+                    log(f"  Skipping index {idx_name} on {table_name} (no key columns reported)")
+                    skipped += 1
+                    continue
+                # cid -2 = expression, -1 = rowid; neither maps to a Postgres column name.
+                if any(c[1] < 0 for c in key_cols):
+                    log(f"  Skipping expression/rowid index {idx_name} on {table_name} (recreate manually if needed)")
+                    skipped += 1
+                    continue
+                col_sql = ", ".join(f'"{c[2]}"' + (" DESC" if c[3] else "") for c in key_cols)
+                sql = f'{create} "{idx_name}" ON "{table_name}" ({col_sql})'
 
-            # PRAGMA index_xinfo cols: seqno, cid, name, desc, coll, key
-            key_cols = [c for c in conn.execute(f"PRAGMA index_xinfo('{idx_name}')").fetchall() if c[5]]
-            if not key_cols:
-                continue
-            if any(c[1] == -2 for c in key_cols):
-                log(f"  Skipping expression index {idx_name} on {table_name} (recreate manually if needed)")
-                skipped += 1
-                continue
-
-            col_sql = ", ".join(f'"{c[2]}"' + (" DESC" if c[3] else "") for c in key_cols)
             try:
-                run_psql(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON "{table_name}" ({col_sql})')
+                if pg_name in invalid:
+                    log(f"  Rebuilding invalid index {pg_name} on {table_name}")
+                    _drop_invalid_index(pg_name, concurrent)
+                run_psql(sql)
                 created += 1
             except RuntimeError as e:
+                failed += 1
                 log(f"  Warning: could not create index {idx_name} on {table_name}: {e}")
+                if concurrent:
+                    # A failed concurrent build leaves an INVALID index behind; remove it so the
+                    # next run retries instead of treating it as present.
+                    try:
+                        if pg_name in _pg_index_names(valid=False):
+                            _drop_invalid_index(pg_name, concurrent)
+                    except RuntimeError:
+                        pass
 
-    log(f"Created {created} regular index(es) from SQLite schema ({present} already present, {skipped} skipped).")
+    log(
+        f"Created {created} regular index(es) from SQLite schema "
+        f"({present} already present, {skipped} skipped, {failed} failed)."
+    )
 
 
 def create_foreign_keys(conn: sqlite3.Connection) -> None:
@@ -616,14 +708,24 @@ def reset_sequences() -> None:
 
 
 def restore_indexes_only() -> None:
-    """Create missing regular indexes on an already-migrated database. Imports no data."""
+    """Create missing regular indexes on an already-migrated database. Imports no data.
+
+    Safe to run on a live install: indexes are built with CREATE INDEX CONCURRENTLY, so
+    writes from import and sync jobs are not blocked while they build.
+
+    Some "could not create index" warnings are expected here. The SQLite file is a
+    snapshot from conversion time, so any index on a column or table that a later
+    Postgres migration renamed or dropped can no longer be created. Those warnings are
+    harmless; every other index is still created.
+    """
     if not os.path.isfile(SQLITE_DB):
         log(f"SQLite database not found at {SQLITE_DB}. Nothing to restore from.")
         sys.exit(1)
 
     conn = sqlite3.connect(f"file:{SQLITE_DB}?mode=ro", uri=True)
     log(f"Restoring regular indexes from {SQLITE_DB} (no data is changed)...")
-    create_regular_indexes(conn)
+    log("Note: warnings for columns or tables changed by later migrations are expected.")
+    create_regular_indexes(conn, concurrent=True)
     conn.close()
 
 
@@ -673,13 +775,17 @@ def main() -> None:
     log("Creating foreign key constraints from SQLite schema...")
     create_foreign_keys(conn)
 
+    log("Converting json() columns from text to jsonb...")
+    convert_json_columns_from_migrations()
+
+    # After the jsonb conversion: each ALTER COLUMN ... TYPE jsonb rewrites the table and
+    # rebuilds every index on it, so building these first would reindex wide tables like
+    # channels once per json column. Still runs before php artisan migrate, so later
+    # migrations can find these indexes by name.
     log("Creating regular indexes from SQLite schema...")
     create_regular_indexes(conn)
 
     conn.close()
-
-    log("Converting json() columns from text to jsonb...")
-    convert_json_columns_from_migrations()
 
     log("Removing pgsql-only migration records so they re-run...")
     remove_pgsql_only_migrations()
