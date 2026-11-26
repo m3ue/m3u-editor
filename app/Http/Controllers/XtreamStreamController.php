@@ -18,8 +18,11 @@ use App\Services\MediaSourcePreferenceService;
 use App\Services\PlaylistCredentialResolver;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
+use App\Services\ProfileService;
+use App\Services\ProviderProfileRedirectService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -275,7 +278,7 @@ class XtreamStreamController extends Controller
                 channelEnableProxy: (bool) $channel->enable_proxy,
                 playlistEnableProxy: (bool) $playlist->enable_proxy,
                 requestProxyFlag: $request->input('proxy') === 'true',
-                sourcePlaylistProfilesEnabled: $channel->playlist instanceof Playlist && $channel->playlist->profiles_enabled,
+                sourcePlaylistProfilesEnabled: $channel->playlist instanceof Playlist && $channel->playlist->poolsProfilesThroughProxy(),
                 userCanUseProxy: $playlist->user->canUseProxy(),
             );
 
@@ -297,8 +300,12 @@ class XtreamStreamController extends Controller
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
-                // Get the base stream URL
-                $streamUrl = PlaylistUrlService::getChannelUrl($streamChannel, $playlist);
+                // Get the base stream URL (from the assigned account in Redirect-mode provider profiles)
+                $streamUrl = $this->resolveProfileRedirectUrl($request, $username, $playlist, $streamChannel)
+                    ?? PlaylistUrlService::getChannelUrl($streamChannel, $playlist);
+                if ($streamUrl instanceof JsonResponse) {
+                    return $streamUrl;
+                }
                 if ($isTimeshiftRequest) {
                     // Timeshift stream request: TiviMate/M3U utc+lutc (UNIX epochs), or Xtream
                     // timeshift_duration (minutes) + timeshift_date (YYYY-MM-DD:HH-MM-SS)
@@ -341,7 +348,7 @@ class XtreamStreamController extends Controller
                 channelEnableProxy: (bool) $channel->enable_proxy,
                 playlistEnableProxy: (bool) $playlist->enable_proxy,
                 requestProxyFlag: $request->input('proxy') === 'true',
-                sourcePlaylistProfilesEnabled: $channel->playlist instanceof Playlist && $channel->playlist->profiles_enabled,
+                sourcePlaylistProfilesEnabled: $channel->playlist instanceof Playlist && $channel->playlist->poolsProfilesThroughProxy(),
                 userCanUseProxy: $playlist->user->canUseProxy(),
             );
 
@@ -372,7 +379,13 @@ class XtreamStreamController extends Controller
                     $playlist = $media->getEffectivePlaylist();
                 }
 
-                return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getChannelUrl($channel, $playlist)));
+                $streamUrl = $this->resolveProfileRedirectUrl($request, $username, $playlist, $channel)
+                    ?? PlaylistUrlService::getChannelUrl($channel, $playlist);
+                if ($streamUrl instanceof JsonResponse) {
+                    return $streamUrl;
+                }
+
+                return Redirect::to($this->applyMediaFlowProxy($streamUrl));
             }
         }
 
@@ -424,7 +437,13 @@ class XtreamStreamController extends Controller
                     $playlist = $media->playlist;
                 }
 
-                return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getEpisodeUrl($episode, $playlist)));
+                $streamUrl = $this->resolveProfileRedirectUrl($request, $username, $playlist, $episode)
+                    ?? PlaylistUrlService::getEpisodeUrl($episode, $playlist);
+                if ($streamUrl instanceof JsonResponse) {
+                    return $streamUrl;
+                }
+
+                return Redirect::to($this->applyMediaFlowProxy($streamUrl));
             }
         }
 
@@ -534,10 +553,44 @@ class XtreamStreamController extends Controller
                 'uuid' => $playlist->uuid,
             ]);
         } else {
-            $streamUrl = PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
+            $streamUrl = $this->resolveProfileRedirectUrl($request, $username, $playlist, $timeshiftChannel)
+                ?? PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
+            if ($streamUrl instanceof JsonResponse) {
+                return $streamUrl;
+            }
 
             return $this->timeshiftRedirect(PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $timeshiftChannel));
         }
+    }
+
+    /**
+     * Redirect-mode provider profiles: the provider URL for the account assigned to
+     * this client, a 503 response when every account is busy, or null when the
+     * item's playlist does not use Redirect mode (the caller keeps its usual URL).
+     */
+    private function resolveProfileRedirectUrl(Request $request, string $username, $playlist, Channel|Episode $item): string|JsonResponse|null
+    {
+        $redirectService = app(ProviderProfileRedirectService::class);
+        $sourcePlaylist = $redirectService->resolveRedirectPlaylist($playlist, $item);
+
+        if (! $sourcePlaylist) {
+            return null;
+        }
+
+        $streamUrl = $redirectService->resolveStreamUrl(
+            $sourcePlaylist,
+            $playlist,
+            $item,
+            ProfileService::buildClientIdentifier($request->ip(), $username),
+        );
+
+        if ($streamUrl === null || $streamUrl === '') {
+            return response()->json([
+                'error' => 'All provider profiles have reached their maximum stream limit. Please try again later.',
+            ], 503);
+        }
+
+        return $streamUrl;
     }
 
     /**

@@ -280,12 +280,25 @@ class ProfileService
         // count that's a few milliseconds stale is fine because the reservation set
         // (checked inside the lock via countPendingReservations()) is what actually
         // prevents concurrent requests from over-allocating a slot.
-        $profileIds = $playlist->enabledProfiles()
-            ->when($excludeProfileId, fn ($query) => $query->where('id', '!=', $excludeProfileId))
-            ->pluck('id')
-            ->map(fn ($id) => (string) $id)
-            ->all();
-        $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+        $candidateProfiles = $playlist->enabledProfiles()
+            ->when($excludeProfileId, fn ($query) => $query->where('id', '!=', $excludeProfileId));
+
+        $redirectService = null;
+
+        if ($playlist->usesProfileRedirect()) {
+            // Redirect mode: redirected streams never reach m3u-proxy, so the proxy's
+            // own counts would miss them. Use the same counts Redirect mode uses: the
+            // network part here, the redirect assignments inside the lock below.
+            $redirectService = app(ProviderProfileRedirectService::class);
+            $redirectProfiles = $candidateProfiles->get();
+            $redirectBaseCounts = $redirectService->fetchBaseCounts($playlist, $redirectProfiles);
+        } else {
+            $profileIds = $candidateProfiles
+                ->pluck('id')
+                ->map(fn ($id) => (string) $id)
+                ->all();
+            $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+        }
 
         $lockKey = "profile_select_lock:playlist:{$playlist->id}";
         $reservationId = 'reservation:'.bin2hex(random_bytes(8));
@@ -330,12 +343,20 @@ class ProfileService
             }
 
             // Inside the lock: select + increment atomically
+            if ($redirectService) {
+                $proxyCounts = $redirectService->connectionCounts($playlist, $redirectProfiles, $redirectBaseCounts, null);
+            }
+
             $profile = static::selectProfile($playlist, $excludeProfileId, $forceSelect, $clientIdentifier, $proxyCounts);
 
             if ($profile) {
                 // Reserve the slot immediately so the next concurrent request
                 // sees the updated count and picks a different profile (or waits).
                 static::incrementConnections($profile, $reservationId);
+
+                if ($redirectService) {
+                    $redirectService->recordProxyStream($profile, $reservationId);
+                }
 
                 // Mark this channel as having a pending reservation (short TTL so
                 // it self-expires if stream creation fails before finalizeReservation).
@@ -627,8 +648,14 @@ class ProfileService
 
         return Cache::remember("pool_status_{$playlist->id}", 5, function () use ($playlist) {
             $allProfiles = $playlist->profiles()->get();
-            $profileIds = $allProfiles->pluck('id')->map(fn ($id) => (string) $id)->all();
-            $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+
+            if ($playlist->usesProfileRedirect()) {
+                // Redirected streams never reach m3u-proxy; count them the way Redirect mode does.
+                $proxyCounts = app(ProviderProfileRedirectService::class)->poolStatusCounts($playlist, $allProfiles);
+            } else {
+                $profileIds = $allProfiles->pluck('id')->map(fn ($id) => (string) $id)->all();
+                $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+            }
 
             $profiles = [];
             $totalCapacity = 0;

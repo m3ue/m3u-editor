@@ -259,3 +259,25 @@ it('shows the M3U profile fields for a playlist switched from Xtream with a stal
     // Before, the stale config made the backend skip the M3U primary and drop the limit
     expect($playlist->profiles()->where('is_primary', true)->first()?->max_streams)->toBe(4);
 });
+
+it('turns the stream proxy off when Redirect mode is enabled, without requiring m3u-proxy', function () {
+    config(['proxy.m3u_proxy_token' => null]);
+    $playlist = m3uProfilesFormPlaylist($this->user);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->fillForm(['user_agent' => 'Test Agent'])
+        ->set('data.profiles_redirect', true)
+        ->assertFormFieldVisible('profiles_redirect_hold_seconds')
+        ->assertFormFieldHidden('profiles_redirect_poll_provider')
+        ->assertFormFieldHidden('profiles_redirect_cache_seconds')
+        ->fillForm(['profiles_redirect_hold_seconds' => 900])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $playlist->refresh();
+
+    expect($playlist->profiles_redirect)->toBeTrue()
+        ->and((bool) $playlist->enable_proxy)->toBeFalse()
+        ->and($playlist->profiles_redirect_hold_seconds)->toBe(900)
+        ->and($playlist->usesProfileRedirect())->toBeTrue();
+});

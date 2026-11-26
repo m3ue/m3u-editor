@@ -103,6 +103,10 @@ class Playlist extends Model
         'profiles_enabled' => 'boolean',
         'bypass_provider_limits' => 'boolean',
         'enable_provider_affinity' => 'boolean',
+        'profiles_redirect' => 'boolean',
+        'profiles_redirect_poll_provider' => 'boolean',
+        'profiles_redirect_cache_seconds' => 'integer',
+        'profiles_redirect_hold_seconds' => 'integer',
         'is_network_playlist' => 'boolean',
         'status' => Status::class,
         'id_channel_by' => PlaylistChannelId::class,
@@ -501,6 +505,36 @@ class Playlist extends Model
     public function enabledProfiles(): HasMany
     {
         return $this->profiles()->where('enabled', true)->orderBy('priority');
+    }
+
+    /**
+     * Whether pooled provider profiles hand players a redirect to the selected
+     * account's provider URL instead of proxying the stream (see
+     * ProviderProfileRedirectService).
+     */
+    public function usesProfileRedirect(): bool
+    {
+        return (bool) $this->profiles_enabled && (bool) $this->profiles_redirect;
+    }
+
+    /**
+     * Whether pooled provider profiles require streams to go through m3u-proxy
+     * (profiles enabled, not in Redirect mode).
+     */
+    public function poolsProfilesThroughProxy(): bool
+    {
+        return (bool) $this->profiles_enabled && ! $this->profiles_redirect;
+    }
+
+    /**
+     * Whether Redirect mode can count connections by polling the provider. Only
+     * Xtream accounts expose active_cons; M3U accounts always count locally.
+     */
+    public function pollsProviderForProfileRedirect(): bool
+    {
+        return $this->usesProfileRedirect()
+            && (bool) $this->xtream
+            && (bool) $this->profiles_redirect_poll_provider;
     }
 
     public function primaryProfile(): ?PlaylistProfile
