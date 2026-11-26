@@ -182,7 +182,7 @@ class PlaylistInfo extends Component
             return collect([$playlist]);
         }
 
-        if ($playlist instanceof CustomPlaylist && $playlist->hasPooledSourcePlaylists()) {
+        if ($playlist instanceof CustomPlaylist) {
             return $playlist->getPooledSourcePlaylists();
         }
 

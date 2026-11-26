@@ -280,12 +280,21 @@ class ProfileService
         // count that's a few milliseconds stale is fine because the reservation set
         // (checked inside the lock via countPendingReservations()) is what actually
         // prevents concurrent requests from over-allocating a slot.
-        $profileIds = $playlist->enabledProfiles()
-            ->when($excludeProfileId, fn ($query) => $query->where('id', '!=', $excludeProfileId))
-            ->pluck('id')
-            ->map(fn ($id) => (string) $id)
-            ->all();
-        $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+        $candidateProfiles = $playlist->enabledProfiles()
+            ->when($excludeProfileId, fn ($query) => $query->where('id', '!=', $excludeProfileId));
+
+        if ($playlist->usesProfileRedirect()) {
+            // Redirect mode: redirected streams never reach m3u-proxy, so the proxy's
+            // own counts would miss them. Use the same counts Redirect mode uses.
+            $proxyCounts = app(ProviderProfileRedirectService::class)
+                ->countsForProxySelection($playlist, $candidateProfiles->get());
+        } else {
+            $profileIds = $candidateProfiles
+                ->pluck('id')
+                ->map(fn ($id) => (string) $id)
+                ->all();
+            $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+        }
 
         $lockKey = "profile_select_lock:playlist:{$playlist->id}";
         $reservationId = 'reservation:'.bin2hex(random_bytes(8));

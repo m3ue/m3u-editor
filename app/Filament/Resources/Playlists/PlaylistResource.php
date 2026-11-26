@@ -1216,22 +1216,23 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->schema([
                             Toggle::make('profiles_enabled')
                                 ->label(__('Enable Provider Profiles'))
-                                ->helperText(__('NOTE: When enabled, proxy mode is required for accurate connection tracking.'))
+                                ->helperText(__('NOTE: When enabled, proxy mode is required for accurate connection tracking, unless Redirect mode is used.'))
                                 ->live()
-                                ->afterStateUpdated(function (Set $set, $state) {
+                                ->afterStateUpdated(function (Set $set, Get $get, $state) {
                                     if ($state) {
-                                        $set('enable_proxy', true);
+                                        $set('enable_proxy', ! $get('profiles_redirect'));
                                     }
                                 })
                                 ->rules([
-                                    fn (): \Closure => function (string $attribute, $value, \Closure $fail) {
-                                        if ($value && ! config('proxy.m3u_proxy_token')) {
+                                    fn (Get $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get) {
+                                        if ($value && ! $get('profiles_redirect') && ! config('proxy.m3u_proxy_token')) {
                                             $fail('Provider Profiles require the m3u-proxy to be configured. Please ensure M3U_PROXY_TOKEN is set.');
                                         }
                                     },
                                 ])
                                 ->inline(false)
-                                ->default(false),
+                                ->default(false)
+                                ->columnSpanFull(),
 
                             Grid::make()
                                 ->columns(1)
@@ -1264,6 +1265,60 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
                                 ->inline(false)
                                 ->default(false),
+                            Toggle::make('profiles_redirect')
+                                ->label(__('Redirect Players to Provider'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Instead of proxying, send each player straight to the provider using an account with a free slot. Streams do not pass through this server.')
+                                )
+                                ->helperText(__('Players connect to the provider directly. Stream proxy features (transcoding, sharing one connection between viewers, stopping the oldest stream) are not available.'))
+                                ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
+                                ->live()
+                                ->afterStateUpdated(fn (Set $set, $state) => $set('enable_proxy', ! $state))
+                                ->inline(false)
+                                ->default(false),
+                        ]),
+
+                    Grid::make()
+                        ->columns(3)
+                        ->columnSpanFull()
+                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled') && (bool) $get('profiles_redirect'))
+                        ->schema([
+                            Toggle::make('profiles_redirect_poll_provider')
+                                ->label(__('Poll Provider for Active Connections'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Ask each account how many streams it is using before picking one. When off, every redirect counts as a busy stream for the hold time instead.')
+                                )
+                                ->helperText(__('Most accurate, but depends on the provider reporting active connections correctly.'))
+                                ->visible(fn (Get $get): bool => (bool) $get('xtream'))
+                                ->live()
+                                ->inline(false)
+                                ->default(true),
+                            TextInput::make('profiles_redirect_cache_seconds')
+                                ->label(__('Provider Count Cache (seconds)'))
+                                ->helperText(__('How long a provider\'s active connection count is reused before asking again.'))
+                                ->numeric()
+                                ->minValue(1)
+                                ->maxValue(300)
+                                ->placeholder('10')
+                                ->default(10)
+                                ->required()
+                                ->visible(fn (Get $get): bool => (bool) $get('xtream') && (bool) $get('profiles_redirect_poll_provider')),
+                            TextInput::make('profiles_redirect_hold_seconds')
+                                ->label(__('Connection Hold (seconds)'))
+                                ->helperText(__('How long each redirect counts as a busy stream. A new stream from the same player replaces its previous one.'))
+                                ->numeric()
+                                ->minValue(1)
+                                ->maxValue(86400)
+                                ->placeholder('3600')
+                                ->default(3600)
+                                ->required()
+                                ->visible(fn (Get $get): bool => ! $get('xtream') || ! $get('profiles_redirect_poll_provider')),
+                            Callout::make(__('Redirect Mode Warning'))
+                                ->warning()
+                                ->description(__('Players receive the provider account\'s username and password in the stream URL, and the provider sees each account used from your viewers\' own IP addresses. Some providers ban accounts that are shared this way.'))
+                                ->columnSpanFull(),
                         ]),
 
                     Fieldset::make(__('Primary Profile'))
@@ -3406,9 +3461,11 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hint(fn (Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
                         ->hintIcon(fn (Get $get): string => ! $get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
                         ->live()
-                        ->helperText(fn (Get $get): string => $get('profiles_enabled')
-                            ? 'Proxy mode is required when Provider Profiles are enabled.'
-                            : 'When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
+                        ->helperText(fn (Get $get): string => match (true) {
+                            ! $get('profiles_enabled') => 'When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.',
+                            (bool) $get('profiles_redirect') => __('Proxy mode is off while Provider Profiles redirect players to the provider.'),
+                            default => 'Proxy mode is required when Provider Profiles are enabled.',
+                        })
                         ->disabled(fn (Get $get): bool => (bool) $get('profiles_enabled'))
                         ->dehydrated()
                         ->inline(false)

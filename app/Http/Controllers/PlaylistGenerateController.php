@@ -200,7 +200,9 @@ class PlaylistGenerateController extends Controller
                     // This way we can perform additional stream analysis, check for stream limits, etc.
                     // When disabled, will return the raw URL from the channel (or the proxyfied URL if proxy enabled)
                     $useInternalXtreamFormat = ! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format);
-                    if ($useInternalXtreamFormat) {
+                    // Redirect-mode provider profiles pick the account when the player asks
+                    // for the stream, so the player must come through our endpoint.
+                    if ($useInternalXtreamFormat || ($channelSourcePlaylist?->usesProfileRedirect() ?? false)) {
                         $urlPath = 'live';
                         if ($channel->is_vod) {
                             $urlPath = 'movie';
@@ -593,7 +595,8 @@ class PlaylistGenerateController extends Controller
                 // Format the URL in Xtream Codes format if not disabled
                 // This way we can perform additional stream analysis, check for stream limits, etc.
                 // When disabled, will return the raw URL from the channel (or the proxyfied URL if proxy enabled)
-                if ($useInternalXtreamFormat) {
+                // Redirect-mode provider profiles need the player to come through our endpoint.
+                if ($useInternalXtreamFormat || ($channelSourcePlaylist?->usesProfileRedirect() ?? false)) {
                     $urlPath = 'live';
                     if ($channel->is_vod) {
                         $urlPath = 'movie';
@@ -746,7 +749,7 @@ class PlaylistGenerateController extends Controller
         $sourcePlaylistId = $channel->playlist_id;
         if ($sourcePlaylistId !== null) {
             if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
-                $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'profiles_enabled', 'xtream_config']);
+                $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'profiles_enabled', 'profiles_redirect', 'xtream_config']);
             }
             $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
         } else {
@@ -757,7 +760,7 @@ class PlaylistGenerateController extends Controller
             channelEnableProxy: (bool) $channel->enable_proxy,
             playlistEnableProxy: $proxyEnabled,
             requestProxyFlag: false,
-            sourcePlaylistProfilesEnabled: $channelSourcePlaylist->profiles_enabled ?? false,
+            sourcePlaylistProfilesEnabled: $channelSourcePlaylist?->poolsProfilesThroughProxy() ?? false,
             userCanUseProxy: $playlist->user->canUseProxy(),
         );
 

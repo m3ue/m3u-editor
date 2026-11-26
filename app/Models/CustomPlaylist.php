@@ -338,14 +338,15 @@ class CustomPlaylist extends Model
     }
 
     /**
-     * Check if any source playlists have provider profiles enabled.
+     * Check if any source playlists pool provider profiles through the proxy.
      * When this returns true, proxy mode should be required for proper connection pooling.
+     * Sources in Redirect mode pick an account without the proxy, so they don't count.
      */
     public function hasPooledSourcePlaylists(): bool
     {
         return $this->channels()
             ->whereNotNull('playlist_id')
-            ->whereHas('playlist', fn ($query) => $query->where('profiles_enabled', true))
+            ->whereHas('playlist', fn ($query) => $query->where('profiles_enabled', true)->where('profiles_redirect', false))
             ->exists();
     }
 
