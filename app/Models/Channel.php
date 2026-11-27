@@ -477,7 +477,7 @@ class Channel extends Model
      *
      * @var list<string>
      */
-    private const XTREAM_LIVE_STREAM_TYPES = ['live', 'created_live', 'radio_streams'];
+    public const XTREAM_LIVE_STREAM_TYPES = ['live', 'created_live', 'radio_streams'];
 
     /**
      * The `stream_type` to emit from the Xtream `get_live_streams` action: the user's

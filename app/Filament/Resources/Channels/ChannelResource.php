@@ -81,6 +81,14 @@ class ChannelResource extends Resource implements CopilotResource
     use HasCopilotSupport;
     use HasUserFiltering;
 
+    /**
+     * Suggested TVG Type values: the Xtream live stream types plus the common M3U tvg-type
+     * values. The field stays free text, so any other value can still be entered.
+     *
+     * @var list<string>
+     */
+    public const TVG_TYPE_SUGGESTIONS = [...Channel::XTREAM_LIVE_STREAM_TYPES, 'movies', 'tvshows'];
+
     protected static ?string $model = Channel::class;
 
     protected static ?string $recordTitleAttribute = 'title';
@@ -983,6 +991,33 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-clock')
                     ->modalDescription(__('Set the EPG time shift (tvg-shift) for the selected channels. This shifts the EPG program schedule by the specified number of hours.'))
                     ->modalSubmitActionLabel(__('Set EPG shift')),
+                BulkAction::make('set-tvg-id')
+                    ->label(__('Set TVG ID'))
+                    ->schema([
+                        TextInput::make('stream_id_custom')
+                            ->label(__('TVG ID'))
+                            ->helperText(__('Leave empty to clear the override and use the provider tvg-id again.'))
+                            ->maxLength(255),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $value = trim((string) ($data['stream_id_custom'] ?? '')) ?: null;
+                        $updated = 0;
+                        foreach ($records->chunk(100) as $chunk) {
+                            $updated += Channel::whereIn('id', $chunk->pluck('id'))->update(['stream_id_custom' => $value]);
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('TVG ID updated'))
+                            ->body(trans_choice(':count channel updated|:count channels updated', $updated, ['count' => $updated]))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-identification')
+                    ->modalIcon('heroicon-o-identification')
+                    ->modalDescription(__('Set (or clear) the tvg-id override for the selected channels.'))
+                    ->modalSubmitActionLabel(__('Apply')),
             ]),
 
             // -- Find & Replace --
@@ -1162,6 +1197,34 @@ class ChannelResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-cog-6-tooth')
                     ->modalIcon('heroicon-o-cog-6-tooth')
                     ->modalDescription(__('Assign (or clear) a stream profile for the selected channels.'))
+                    ->modalSubmitActionLabel(__('Apply')),
+                BulkAction::make('set-tvg-type')
+                    ->label(__('Set TVG Type'))
+                    ->schema([
+                        TextInput::make('tvg_type')
+                            ->label(__('TVG Type'))
+                            ->datalist(self::TVG_TYPE_SUGGESTIONS)
+                            ->helperText(__('Leave empty to clear the override and use the provider type again.'))
+                            ->maxLength(255),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $value = trim((string) ($data['tvg_type'] ?? '')) ?: null;
+                        $updated = 0;
+                        foreach ($records->chunk(100) as $chunk) {
+                            $updated += Channel::whereIn('id', $chunk->pluck('id'))->update(['tvg_type' => $value]);
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('TVG Type updated'))
+                            ->body(trans_choice(':count channel updated|:count channels updated', $updated, ['count' => $updated]))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-tag')
+                    ->modalIcon('heroicon-o-tag')
+                    ->modalDescription(__('Set (or clear) the stream type for the selected channels. It is sent as the Xtream API stream_type, and as tvg-type in M3U playlists with "Enable TVG Type Output" turned on.'))
                     ->modalSubmitActionLabel(__('Apply')),
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
@@ -1848,6 +1911,8 @@ class ChannelResource extends Resource implements CopilotResource
                         ->label(__('TVG Type'))
                         ->hint(__('tvg-type'))
                         ->placeholder(fn ($record): ?string => $record instanceof Channel ? $record->stream_type : null)
+                        ->datalist(self::TVG_TYPE_SUGGESTIONS)
+                        ->helperText(__('Sent as the Xtream API stream_type (live, created_live or radio_streams for live channels), and as tvg-type in M3U playlists with "Enable TVG Type Output" turned on. Leave empty to use the provider type.'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
                             tooltip: __('Typically used to specify stream type, e.g.: "live", "movies", "tvshows", etc.'),
