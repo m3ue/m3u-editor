@@ -60,6 +60,19 @@ class ChannelDetailResource extends ChannelResource
             'catchup' => $this->catchup ?? false,
             'shift' => $this->shift ?? 0,
             'tvg_shift' => $this->tvg_shift,
+            /**
+             * User-set stream type override (e.g. "live", "movies", "radio_streams"), or null.
+             *
+             * @var string|null
+             */
+            'tvg_type' => $this->tvg_type,
+            /**
+             * Stream type reported by the provider on the last sync (M3U `tvg-type` or Xtream
+             * `stream_type`), or null. `tvg_type` takes precedence over it on output.
+             *
+             * @var string|null
+             */
+            'stream_type' => $this->stream_type,
             /** @var 'channel'|'epg'|null */
             'logo_type' => $this->logo_type?->value,
             'use_epg_logo' => $this->logo_type === ChannelLogoType::Epg,

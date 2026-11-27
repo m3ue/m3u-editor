@@ -1847,6 +1847,7 @@ class ChannelResource extends Resource implements CopilotResource
                     TextInput::make('tvg_type')
                         ->label(__('TVG Type'))
                         ->hint(__('tvg-type'))
+                        ->placeholder(fn ($record): ?string => $record instanceof Channel ? $record->stream_type : null)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
                             tooltip: __('Typically used to specify stream type, e.g.: "live", "movies", "tvshows", etc.'),

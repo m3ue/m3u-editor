@@ -452,6 +452,60 @@ class Channel extends Model
         };
     }
 
+    /**
+     * The `tvg-type` to emit in M3U output: the user's `tvg_type` override, else the
+     * provider's `stream_type`, else "live" (or "movies" for VOD). Xtream vocabulary from
+     * the provider is translated to the M3U equivalents ("movie" -> "movies",
+     * "series" -> "tvshows") so Xtream-sourced VOD keeps reporting "movies".
+     */
+    public function resolveM3uTvgType(): string
+    {
+        $type = $this->resolveStoredStreamType();
+
+        return match ($type) {
+            null => $this->is_vod ? 'movies' : 'live',
+            'movie' => 'movies',
+            'series' => 'tvshows',
+            default => $type,
+        };
+    }
+
+    /**
+     * Live `stream_type` values real Xtream panels send. Players can build the playback
+     * URL from `stream_type`, so anything else (e.g. "movie"/"series") would route a live
+     * channel to the wrong endpoint.
+     *
+     * @var list<string>
+     */
+    private const XTREAM_LIVE_STREAM_TYPES = ['live', 'created_live', 'radio_streams'];
+
+    /**
+     * The `stream_type` to emit from the Xtream `get_live_streams` action: the user's
+     * `tvg_type` override, else the provider's `stream_type`, as long as it is a live type
+     * Xtream panels use ("live", "created_live", "radio_streams"), else "live".
+     */
+    public function resolveXtreamLiveStreamType(): string
+    {
+        $type = $this->resolveStoredStreamType();
+
+        return in_array($type, self::XTREAM_LIVE_STREAM_TYPES, true) ? $type : 'live';
+    }
+
+    /**
+     * The stored stream type, override first, normalized to lowercase, or null when unset.
+     */
+    private function resolveStoredStreamType(): ?string
+    {
+        foreach ([$this->tvg_type, $this->stream_type] as $candidate) {
+            $normalized = strtolower(trim((string) $candidate));
+            if ($normalized !== '') {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
     public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array
     {
         $settings = app(GeneralSettings::class);

@@ -275,16 +275,7 @@ class PlaylistGenerateController extends Controller
 
                     // Output TVG type if enabled
                     if ($tvgTypeoutputEnabled) {
-                        $channelType = 'live'; // default for Live content
-
-                        // Channel specific tvg-type takes precedence, otherwise fallback to basic live/vod categorization
-                        if ($channel->tvg_type) {
-                            $channelType = $channel->tvg_type;
-                        } elseif ($channel->is_vod) {
-                            $channelType = 'movies'; // default for VOD
-                        }
-
-                        $extInf .= " tvg-type=\"{$channelType}\"";
+                        $extInf .= " tvg-type=\"{$channel->resolveM3uTvgType()}\"";
                     }
                     $tmdbId = $channel->tmdb_id ?: ($channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? null);
                     if ($tmdbId) {

@@ -660,6 +660,7 @@ class ProcessM3uImport implements ShouldQueue
                 'catchup_source' => null,
                 'shift' => 0,
                 'tvg_shift' => null,
+                'stream_type' => null, // provider `stream_type` (e.g. live, movie, radio_streams)
                 'is_vod' => false, // default false
                 'container_extension' => null, // default null, will be set for VOD streams
                 'year' => null, // new field for year
@@ -732,6 +733,7 @@ class ProcessM3uImport implements ShouldQueue
                             'catchup' => $item->tv_archive ?? null,
                             'shift' => (int) ($item->tv_archive_duration ?? 0) * 24,
                             // 'tvg_shift' => $item->tvg_shift ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
+                            'stream_type' => mb_substr((string) ($item->stream_type ?? ''), 0, 255) ?: null,
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;
@@ -784,6 +786,7 @@ class ProcessM3uImport implements ShouldQueue
                             'source_id' => $item->stream_id, // source ID for the channel
                             ...ChannelNumber::toAttributes($item->num ?? null),
                             'is_vod' => true, // mark as VOD
+                            'stream_type' => mb_substr((string) ($item->stream_type ?? ''), 0, 255) ?: null,
                             'container_extension' => $extension, // store the container extension
                             'year' => $item->year ?? null, // new field for year
                             'rating' => $item->rating ?? null, // new field for rating
@@ -942,6 +945,7 @@ class ProcessM3uImport implements ShouldQueue
                     'catchup_source' => null,
                     'shift' => 0,
                     'tvg_shift' => null,
+                    'stream_type' => null, // provider `tvg-type` (e.g. live, movies, tvshows)
                     'is_vod' => false, // default false, matches Xtream API path
                     'container_extension' => null,
                     'source_id' => null, // filled by ProcessM3uImportChunk after collision detection
@@ -981,6 +985,7 @@ class ProcessM3uImport implements ShouldQueue
                         'catchup' => 'catchup',
                         'catchup_source' => 'catchup-source',
                         'tvg_shift' => 'tvg-shift', // used for EPG shift in hrs (can be negative)
+                        'stream_type' => 'tvg-type', // provider stream type, the user's tvg_type overrides it on output
                     ];
 
                     // Parse the M3U file
@@ -1037,6 +1042,10 @@ class ProcessM3uImport implements ShouldQueue
                                         }
                                     }
                                 }
+
+                                // Provider data, so keep it within the varchar(255) column (an over-long
+                                // value would fail the whole chunk's upsert on Postgres).
+                                $channel['stream_type'] = mb_substr((string) $channel['stream_type'], 0, 255) ?: null;
 
                                 // Catch-up window, stored in hours. Providers use different attributes
                                 // for it, all in days: 'catchup-days', 'tvg-rec' and the older SIPTV

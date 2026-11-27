@@ -115,6 +115,7 @@ class ProcessM3uImportChunk implements ShouldQueue
                 'catchup_source',
                 'shift',
                 // 'tvg_shift', // new field for TVG shift (don't update user overridden value)
+                'stream_type', // provider stream type (the user's override lives in `tvg_type`)
                 // 'is_vod', // part of the upsert key
                 'container_extension', // new field for container extension
                 'year', // new field for year

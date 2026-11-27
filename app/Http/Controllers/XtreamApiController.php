@@ -186,6 +186,8 @@ class XtreamApiController extends Controller
      * `added`, `category_id`, `category_ids`, `tv_archive`, `tv_archive_duration`, `custom_sid`, `thumbnail`, `direct_source`.
      * `direct_source` is always an empty string (kept for Xtream compatibility). Clients build playback URLs from `stream_id`, so upstream provider URLs and credentials are never exposed.
      * The `thumbnail` field contains the same value as `stream_icon`.
+     * `stream_type` is the channel's TVG Type override, else the provider's stream type from the last sync, when it is
+     * one of `live`, `created_live` or `radio_streams`; otherwise it is `live`.
      * `tv_archive_duration` is in days. It falls back to `dev.default_epg_catchup_days` (env `DEFAULT_EPG_CATCHUP_DAYS`,
      * default 7) when `tv_archive` is `1` but the actual retention window is unknown (catchup enabled with no known
      * duration), and is `0` when catchup is unavailable or disabled entirely.
@@ -778,7 +780,7 @@ class XtreamApiController extends Controller
                         // ("5.1") reports its major number here; tvg-id keeps the full one.
                         'num' => ChannelNumber::major($channelNo),
                         'name' => $channel->title_custom ?? $channel->title,
-                        'stream_type' => 'live',
+                        'stream_type' => $channel->resolveXtreamLiveStreamType(),
                         'stream_id' => $channel->id,
                         'stream_icon' => $streamIcon,
                         'epg_channel_id' => $tvgId,
