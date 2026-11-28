@@ -1,8 +1,10 @@
 <?php
 
 use App\Filament\Pages\Backups;
+use App\Jobs\CreateBackup;
 use App\Livewire\BackupDestinationListRecords;
 use App\Models\User;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
@@ -82,4 +84,23 @@ it('renders the Backups page and its backup list for an admin', function () {
         ->assertOk()
         ->assertSee('2026-11-18-08-00-00.zip')
         ->assertSeeHtml('wire:poll.30s');
+});
+
+it('shows the Create, Upload and Restore backup actions on the Backups page', function () {
+    // The plugin's base page defines its own getHeaderActions(), so ours must override
+    // that method; the deprecated getActions() hook is no longer reached.
+    config(['backup.backup.destination.disks' => ['local']]);
+    Storage::fake('local');
+    Bus::fake();
+
+    $this->actingAs(User::factory()->admin()->create());
+
+    Livewire::test(Backups::class)
+        ->assertActionExists('Restore Backup')
+        ->assertActionExists('Upload Backup')
+        ->assertActionVisible('Create Backup')
+        ->callAction('Create Backup', ['include_files' => true])
+        ->assertNotified();
+
+    Bus::assertDispatched(CreateBackup::class);
 });

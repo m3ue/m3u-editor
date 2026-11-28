@@ -44,7 +44,12 @@ class Backups extends BaseBackups
         return null;
     }
 
-    protected function getActions(): array
+    /**
+     * Overrides the plugin page's own header actions (since its 2026-11-26 commit it
+     * defines getHeaderActions() directly, so the deprecated getActions() hook is
+     * never reached).
+     */
+    protected function getHeaderActions(): array
     {
         $data = [];
         foreach (FilamentSpatieLaravelBackup::getDisks() as $disk) {
