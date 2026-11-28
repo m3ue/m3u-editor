@@ -72,7 +72,6 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -134,6 +133,7 @@ class SeriesResource extends Resource implements CopilotResource
                     'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort'),
                 ]);
             })
+            ->deferLoading()
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
             ->defaultSort('sort')
@@ -380,8 +380,9 @@ class SeriesResource extends Resource implements CopilotResource
             ->modalHeading(__('Cache all episodes from selected series?'))
             ->modalDescription(__('Queue background downloads of every episode of every selected series to local storage, or add each series to Sonarr if Sonarr is set up for caching. Episodes that are already cached, queued, or have no cacheable source URL are skipped.'))
             ->modalSubmitActionLabel(__('Cache all episodes'))
-            ->action(function (Collection $records): void {
-                QueueCachedContentDownloads::dispatch('series', $records->modelKeys(), auth()->id());
+            ->fetchSelectedRecords(false)
+            ->action(function (Builder $recordsQuery): void {
+                QueueCachedContentDownloads::dispatch('series', PlaylistService::selectedRecordIds($recordsQuery), auth()->id());
             })->after(function () {
                 Notification::make()
                     ->success()
@@ -770,9 +771,10 @@ class SeriesResource extends Resource implements CopilotResource
                                     ])->pluck('name', 'id')
                             )->searchable(),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $category = Category::findOrFail($data['category']);
-                        foreach ($records as $record) {
+                        foreach (PlaylistService::lazySelectedRecords($recordsQuery) as $record) {
                             // Update the series to the new category
                             // This will change the category_id for the series in the database
                             // to reflect the new category
@@ -819,8 +821,9 @@ class SeriesResource extends Resource implements CopilotResource
                                 AssetPickerAction::browse('cover'),
                             ]),
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        Series::whereIn('id', $records->pluck('id')->toArray())
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
+                        Series::whereKey(PlaylistService::selectedRecordIds($recordsQuery))
                             ->update([
                                 'cover' => empty($data['cover']) ? null : $data['cover'],
                             ]);
@@ -839,8 +842,9 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Apply URL')),
                 BulkAction::make('refresh_logo_cache')
                     ->label(__('Refresh poster cache (selected)'))
-                    ->action(function (Collection $records): void {
-                        $urls = $records
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        $urls = Series::whereKey(PlaylistService::selectedRecordIds($recordsQuery))
                             ->pluck('cover')
                             ->filter()
                             ->values()
@@ -873,8 +877,9 @@ class SeriesResource extends Resource implements CopilotResource
                             ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
                             ->default(false),
                     ])
-                    ->action(function ($records, array $data) {
-                        foreach ($records as $record) {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data) {
+                        foreach (PlaylistService::lazySelectedRecords($recordsQuery) as $record) {
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new ProcessM3uImportSeriesEpisodes(
                                     playlistSeries: $record,
@@ -903,7 +908,8 @@ class SeriesResource extends Resource implements CopilotResource
                             ->helperText(__('Overwrite existing TMDB metadata? If disabled, only series missing metadata are fetched.'))
                             ->default(false),
                     ])
-                    ->action(function ($records, $data) {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data) {
                         $settings = app(GeneralSettings::class);
                         if (empty($settings->tmdb_api_key)) {
                             Notification::make()
@@ -916,7 +922,7 @@ class SeriesResource extends Resource implements CopilotResource
                             return;
                         }
 
-                        $seriesIds = $records->pluck('id')->toArray();
+                        $seriesIds = PlaylistService::selectedRecordIds($recordsQuery);
 
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
@@ -940,8 +946,9 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Yes, fetch metadata now')),
                 BulkAction::make('sync')
                     ->label(__('Sync Series .strm files'))
-                    ->action(function ($records) {
-                        $seriesIds = $records->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery) {
+                        $seriesIds = PlaylistService::selectedRecordIds($recordsQuery);
                         if (empty($seriesIds)) {
                             return;
                         }
@@ -1041,7 +1048,8 @@ class SeriesResource extends Resource implements CopilotResource
                                 ->placeholder(__('Leave empty to remove')),
                         ];
                     })
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new SeriesFindAndReplace(
                                 user_id: auth()->id(), // The ID of the user who owns the content
@@ -1049,7 +1057,7 @@ class SeriesResource extends Resource implements CopilotResource
                                 column: $data['column'] ?? 'title',
                                 find_replace: $data['find_replace'] ?? null,
                                 replace_with: $data['replace_with'] ?? '',
-                                series: $records
+                                series_ids: PlaylistService::selectedRecordIds($recordsQuery),
                             ));
                     })->after(function () {
                         Notification::make()
@@ -1070,8 +1078,9 @@ class SeriesResource extends Resource implements CopilotResource
             BulkModalActionGroup::section('Probing', [
                 BulkAction::make('enable-probing')
                     ->label(__('Enable Probing'))
-                    ->action(function (Collection $records): void {
-                        $seriesIds = $records->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        $seriesIds = PlaylistService::selectedRecordIds($recordsQuery);
                         Episode::whereIn('series_id', $seriesIds)->notAioManaged()->update(['probe_enabled' => true]);
                     })->after(function () {
                         Notification::make()
@@ -1089,8 +1098,9 @@ class SeriesResource extends Resource implements CopilotResource
                 BulkAction::make('disable-probing')
                     ->label(__('Disable Probing'))
                     ->color('warning')
-                    ->action(function (Collection $records): void {
-                        $seriesIds = $records->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        $seriesIds = PlaylistService::selectedRecordIds($recordsQuery);
                         Episode::whereIn('series_id', $seriesIds)->update(['probe_enabled' => false]);
                     })->after(function () {
                         Notification::make()
@@ -1107,8 +1117,9 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Disable now')),
                 BulkAction::make('probe-streams')
                     ->label(__('Probe Streams'))
-                    ->action(function (Collection $records): void {
-                        $seriesIds = $records->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        $seriesIds = PlaylistService::selectedRecordIds($recordsQuery);
                         $episodeIds = Episode::whereIn('series_id', $seriesIds)
                             ->eligibleForProbe()
                             ->pluck('id')
@@ -1158,10 +1169,9 @@ class SeriesResource extends Resource implements CopilotResource
             BulkModalActionGroup::section('Enable / Disable', [
                 BulkAction::make('enable')
                     ->label(__('Enable selected'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Series::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['enabled' => true]);
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1178,10 +1188,9 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Yes, enable now')),
                 BulkAction::make('disable')
                     ->label(__('Disable selected'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Series::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['enabled' => false]);
                     })->after(function () {
                         Notification::make()
                             ->success()

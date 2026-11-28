@@ -28,6 +28,7 @@ class ChannelFindAndReplace implements ShouldQueue
         public ?int $playlist_id = null,
         public bool $silent = false,
         public ?bool $is_vod = null,
+        public ?array $channel_ids = null,
     ) {
         //
     }
@@ -61,7 +62,19 @@ class ChannelFindAndReplace implements ShouldQueue
         $updated = 0;
 
         // Process channels in chunks for better performance
-        if (! $this->channels) {
+        if ($this->channel_ids !== null) {
+            // Selected IDs (e.g. from a bulk action): load each chunk on demand
+            // instead of serializing and rehydrating the whole selection. Not
+            // scoped to user_id: the IDs come from the table's access-scoped
+            // selection, and admins may act on other users' channels.
+            foreach (array_chunk($this->channel_ids, 1000) as $channelIds) {
+                $channels = Channel::query()
+                    ->whereKey($channelIds)
+                    ->get();
+
+                $updated += $this->processChannelChunk($channels, $customColumn);
+            }
+        } elseif (! $this->channels) {
             // Use chunking to process large datasets efficiently
             Channel::query()
                 ->where('user_id', $this->user_id)

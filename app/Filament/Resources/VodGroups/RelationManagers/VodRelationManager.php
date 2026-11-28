@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\VodGroups\RelationManagers;
 
+use App\Filament\Concerns\PreservesSortSlotsOnReorder;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\VodResource;
 use App\Traits\AppliesTmdbSelection;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 class VodRelationManager extends RelationManager
 {
     use AppliesTmdbSelection;
+    use PreservesSortSlotsOnReorder;
 
     protected static string $relationship = 'vod_channels';
 
@@ -55,7 +57,7 @@ class VodRelationManager extends RelationManager
     {
         $table = $table->reorderRecordsTriggerAction(function ($action) {
             return $action->button()->label(__('Sort'));
-        })->defaultSort('sort', 'asc')->reorderable('sort');
+        })->defaultSort('sort', 'asc')->reorderable('sort')->paginatedWhileReordering();
 
         return VodResource::setupTable($table, $this->ownerRecord->id);
     }

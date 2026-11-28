@@ -55,6 +55,7 @@ function runChannelBulkTvgFieldsAction(string $name, array $channels, array $dat
     $action = channelBulkTvgFieldsAction($name);
     $action->evaluate($action->getActionFunction(), [
         'records' => new EloquentCollection($channels),
+        'recordsQuery' => Channel::query()->whereKey(collect($channels)->pluck('id')),
         'data' => $data,
     ]);
 }

@@ -12,7 +12,6 @@ use App\Models\User;
 use App\Services\EpgCacheService;
 use Filament\Actions\BulkAction;
 use Filament\Schemas\Components\Component;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 
@@ -176,7 +175,7 @@ it('clears the EPG cache when the bulk actions set or remove channel profiles', 
     seedEpgCacheFiles($this->playlist, $this->otherPlaylist);
 
     (aedChannelBulkAction($action)->getActionFunction())(
-        new Collection([$channel]),
+        Channel::query()->whereKey([$channel->id]),
         ['aed_profile_id' => $this->profile->id],
     );
 

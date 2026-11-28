@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Groups\RelationManagers;
 
+use App\Filament\Concerns\PreservesSortSlotsOnReorder;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\Channels\Pages\ListChannels;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -12,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class ChannelsRelationManager extends RelationManager
 {
+    use PreservesSortSlotsOnReorder;
+
     // use HasToggleableTable;
 
     protected static string $relationship = 'live_channels';
@@ -55,7 +58,7 @@ class ChannelsRelationManager extends RelationManager
     {
         $table = $table->reorderRecordsTriggerAction(function ($action) {
             return $action->button()->label(__('Sort'));
-        })->defaultSort('sort', 'asc')->reorderable('sort');
+        })->defaultSort('sort', 'asc')->reorderable('sort')->paginatedWhileReordering();
 
         return ChannelResource::setupTable($table, $this->ownerRecord->id);
     }

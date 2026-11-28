@@ -28,6 +28,7 @@ class SeriesFindAndReplace implements ShouldQueue
         public ?int $series_id = null,
         public ?int $playlist_id = null,
         public bool $silent = false,
+        public ?array $series_ids = null,
     ) {
         //
     }
@@ -42,7 +43,19 @@ class SeriesFindAndReplace implements ShouldQueue
         $updated = 0;
 
         // Process channels in chunks for better performance
-        if (! $this->series) {
+        if ($this->series_ids !== null) {
+            // Selected IDs (e.g. from a bulk action): load each chunk on demand
+            // instead of serializing and rehydrating the whole selection. Not
+            // scoped to user_id, matching the channel jobs: the IDs come from
+            // the table's access-scoped selection.
+            foreach (array_chunk($this->series_ids, 1000) as $seriesIds) {
+                $series = Series::query()
+                    ->whereKey($seriesIds)
+                    ->get();
+
+                $updated += $this->processSeriesChunk($series);
+            }
+        } elseif (! $this->series) {
             // Use chunking to process large datasets efficiently
             Series::query()
                 ->where('user_id', $this->user_id)

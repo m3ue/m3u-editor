@@ -62,7 +62,11 @@ function findAndCallBulkAction(array $bulkActions, string $name, Collection $rec
     expect($action)->not->toBeNull("Bulk action [{$name}] not found.");
 
     $actionClosure = (new ReflectionProperty($action, 'action'))->getValue($action);
-    app()->call($actionClosure, ['records' => $records, 'data' => []]);
+    app()->call($actionClosure, [
+        'records' => $records,
+        'recordsQuery' => $records->first()::query()->whereKey($records->modelKeys()),
+        'data' => [],
+    ]);
 }
 
 it('does not let the VOD list bulk "Enable Probing" action turn on probing for AIOStreams-added movies', function () {

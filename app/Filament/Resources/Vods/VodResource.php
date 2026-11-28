@@ -558,8 +558,9 @@ class VodResource extends Resource implements CopilotResource
             ->modalHeading(__('Cache selected VODs?'))
             ->modalDescription(__('Queue background downloads of every selected VOD to local storage, or add them to Radarr if Radarr is set up for caching. VODs that are already cached, queued, or have no cacheable source URL are skipped.'))
             ->modalSubmitActionLabel(__('Cache now'))
-            ->action(function (Collection $records): void {
-                QueueCachedContentDownloads::dispatch('vod', $records->modelKeys(), auth()->id());
+            ->fetchSelectedRecords(false)
+            ->action(function (Builder $recordsQuery): void {
+                QueueCachedContentDownloads::dispatch('vod', PlaylistService::selectedRecordIds($recordsQuery), auth()->id());
             })->after(function () {
                 Notification::make()
                     ->success()
@@ -856,15 +857,14 @@ class VodResource extends Resource implements CopilotResource
                             ->searchable()
                             ->disabled(fn (Get $get) => $get('playlist') === null),
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        $filtered = $records->where('playlist_id', $data['playlist']);
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $group = Group::findOrFail($data['group']);
-                        foreach ($filtered as $record) {
-                            $record->update([
+                        PlaylistService::lazySelectedRecords($recordsQuery, fn (Builder $query) => $query->where('playlist_id', $data['playlist']))
+                            ->each(fn (Channel $channel) => $channel->update([
                                 'group' => $group->name,
                                 'group_id' => $group->id,
-                            ]);
-                        }
+                            ]));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -889,9 +889,11 @@ class VodResource extends Resource implements CopilotResource
                                 ->default(1)
                                 ->required(),
                         ])
-                        ->action(function (Collection $records, array $data): void {
+                        ->fetchSelectedRecords(false)
+                        ->action(function (Builder $recordsQuery, array $data): void {
                             $start = (int) $data['start'];
-                            SortFacade::bulkRecountChannels($records, $start);
+                            $channels = Channel::whereKey(PlaylistService::selectedRecordIds($recordsQuery))->get(['id', 'sort']);
+                            SortFacade::bulkRecountChannels($channels, $start);
                         })
                         ->after(function ($livewire) {
                             Notification::make()
@@ -921,8 +923,9 @@ class VodResource extends Resource implements CopilotResource
                             ->searchable(),
 
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
+                        Channel::whereKey(PlaylistService::selectedRecordIds($recordsQuery))
                             ->update([
                                 'logo_type' => $data['logo_type'],
                             ]);
@@ -952,8 +955,9 @@ class VodResource extends Resource implements CopilotResource
                                 AssetPickerAction::browse('logo'),
                             ]),
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
+                        Channel::whereKey(PlaylistService::selectedRecordIds($recordsQuery))
                             ->update([
                                 'logo' => empty($data['logo']) ? null : $data['logo'],
                             ]);
@@ -972,16 +976,23 @@ class VodResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Apply URL')),
                 BulkAction::make('refresh_logo_cache')
                     ->label(__('Refresh logo cache (selected)'))
-                    ->action(function (Collection $records): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
                         $urls = [];
 
-                        foreach ($records as $record) {
-                            $urls[] = $record->logo;
-                            $urls[] = $record->logo_internal;
-                            $urls[] = $record->epgChannel?->icon_custom;
-                            $urls[] = $record->epgChannel?->icon;
-                            $urls[] = $record->info['movie_image'] ?? null;
-                            $urls[] = $record->info['cover_big'] ?? null;
+                        foreach (array_chunk(PlaylistService::selectedRecordIds($recordsQuery), 500) as $ids) {
+                            $channels = Channel::whereKey($ids)
+                                ->with(['epgChannel' => fn ($query) => $query->select('id', 'icon', 'icon_custom')])
+                                ->get(['id', 'logo', 'logo_internal', 'epg_channel_id', 'info']);
+
+                            foreach ($channels as $record) {
+                                $urls[] = $record->logo;
+                                $urls[] = $record->logo_internal;
+                                $urls[] = $record->epgChannel?->icon_custom;
+                                $urls[] = $record->epgChannel?->icon;
+                                $urls[] = $record->info['movie_image'] ?? null;
+                                $urls[] = $record->info['cover_big'] ?? null;
+                            }
                         }
 
                         $cleared = LogoCacheService::clearByUrls($urls);
@@ -1011,17 +1022,17 @@ class VodResource extends Resource implements CopilotResource
                             ->helperText(__('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.'))
                             ->default(false),
                     ])
-                    ->action(function ($records, $data) {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data) {
                         $count = 0;
-                        foreach ($records as $record) {
-                            if ($record->is_vod) {
-                                $count++;
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new ProcessVodChannels(
-                                        channel: $record,
-                                        force: $data['overwrite_existing'] ?? false
-                                    ));
-                            }
+                        $vodChannels = PlaylistService::lazySelectedRecords($recordsQuery, fn (Builder $query) => $query->where('is_vod', true));
+                        foreach ($vodChannels as $record) {
+                            $count++;
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new ProcessVodChannels(
+                                    channel: $record,
+                                    force: $data['overwrite_existing'] ?? false
+                                ));
                         }
 
                         Notification::make()
@@ -1046,7 +1057,8 @@ class VodResource extends Resource implements CopilotResource
                             ->helperText(__('Overwrite existing TMDB metadata? If disabled, only items missing metadata are fetched.'))
                             ->default(false),
                     ])
-                    ->action(function ($records, $data) {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data) {
                         $settings = app(GeneralSettings::class);
                         if (empty($settings->tmdb_api_key)) {
                             Notification::make()
@@ -1059,7 +1071,7 @@ class VodResource extends Resource implements CopilotResource
                             return;
                         }
 
-                        $vodIds = $records->pluck('id')->toArray();
+                        $vodIds = PlaylistService::selectedRecordIds($recordsQuery);
 
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
@@ -1083,8 +1095,9 @@ class VodResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Yes, fetch metadata now')),
                 BulkAction::make('sync')
                     ->label(__('Sync VOD .strm files'))
-                    ->action(function ($records) {
-                        $channelIds = collect($records)->pluck('id')->filter()->unique()->values()->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery) {
+                        $channelIds = PlaylistService::selectedRecordIds($recordsQuery);
                         if (empty($channelIds)) {
                             return;
                         }
@@ -1185,7 +1198,8 @@ class VodResource extends Resource implements CopilotResource
                                 ->placeholder(__('Leave empty to remove')),
                         ];
                     })
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new ChannelFindAndReplace(
                                 user_id: auth()->id(), // The ID of the user who owns the content
@@ -1193,7 +1207,7 @@ class VodResource extends Resource implements CopilotResource
                                 column: $data['column'] ?? 'title',
                                 find_replace: $data['find_replace'] ?? null,
                                 replace_with: $data['replace_with'] ?? '',
-                                channels: $records
+                                channel_ids: PlaylistService::selectedRecordIds($recordsQuery),
                             ));
                     })->after(function () {
                         Notification::make()
@@ -1223,12 +1237,13 @@ class VodResource extends Resource implements CopilotResource
                             ->required()
                             ->columnSpan(1),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new ChannelFindAndReplaceReset(
                                 user_id: auth()->id(), // The ID of the user who owns the content
                                 column: $data['column'] ?? 'title',
-                                channels: $records
+                                channel_ids: PlaylistService::selectedRecordIds($recordsQuery),
                             ));
                     })->after(function () {
                         Notification::make()
@@ -1263,18 +1278,15 @@ class VodResource extends Resource implements CopilotResource
                             ->helperText(__('When off, only channels without a stream profile will be updated. When on, all selected channels will be overwritten (including clearing back to none).'))
                             ->default(false),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $profileId = ! empty($data['stream_profile_id']) ? (int) $data['stream_profile_id'] : null;
                         $overwrite = (bool) ($data['overwrite_existing'] ?? false);
-                        $updated = 0;
-
-                        foreach ($records->chunk(100) as $chunk) {
-                            $query = Channel::whereIn('id', $chunk->pluck('id'));
-                            if (! $overwrite) {
-                                $query->whereNull('stream_profile_id');
-                            }
-                            $updated += $query->update(['stream_profile_id' => $profileId]);
-                        }
+                        $updated = PlaylistService::updateSelectedRecords(
+                            $recordsQuery,
+                            ['stream_profile_id' => $profileId],
+                            $overwrite ? null : fn (Builder $query) => $query->whereNull('stream_profile_id'),
+                        );
 
                         Notification::make()
                             ->success()
@@ -1290,10 +1302,9 @@ class VodResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Apply')),
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
-                    ->action(function (Collection $records, array $data): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->notAioManaged()->update(['can_merge' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['can_merge' => true], fn (Builder $query) => $query->notAioManaged());
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1311,8 +1322,9 @@ class VodResource extends Resource implements CopilotResource
                 BulkAction::make('disable-merge')
                     ->label(__('Disable Merge'))
                     ->color('warning')
-                    ->action(function (Collection $records, array $data): void {
-                        $records->each(fn ($channel) => $channel->update([
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::lazySelectedRecords($recordsQuery)->each(fn (Channel $channel) => $channel->update([
                             'can_merge' => false,
                         ]));
                     })->after(function () {
@@ -1431,10 +1443,9 @@ class VodResource extends Resource implements CopilotResource
             BulkModalActionGroup::section('Probing', [
                 BulkAction::make('enable-probing')
                     ->label(__('Enable Probing'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->notAioManaged()->update(['probe_enabled' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['probe_enabled' => true], fn (Builder $query) => $query->notAioManaged());
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1451,10 +1462,9 @@ class VodResource extends Resource implements CopilotResource
                 BulkAction::make('disable-probing')
                     ->label(__('Disable Probing'))
                     ->color('warning')
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => false]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['probe_enabled' => false]);
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1470,8 +1480,9 @@ class VodResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Disable now')),
                 BulkAction::make('probe-streams')
                     ->label(__('Probe Streams'))
-                    ->action(function (Collection $records): void {
-                        $ids = $records->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        $ids = PlaylistService::selectedRecordIds($recordsQuery);
                         $start = now();
 
                         $chunks = collect(array_chunk($ids, 50))
@@ -1515,10 +1526,9 @@ class VodResource extends Resource implements CopilotResource
             BulkModalActionGroup::section('Enable / Disable', [
                 BulkAction::make('enable')
                     ->label(__('Enable selected'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['enabled' => true]);
                     })->after(function () {
                         SyncPlexDvrJob::dispatchIfConfigured(trigger: 'vod_bulk_enable');
                         Notification::make()
@@ -1536,10 +1546,9 @@ class VodResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Yes, enable now')),
                 BulkAction::make('disable')
                     ->label(__('Disable selected'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['enabled' => false]);
                     })->after(function () {
                         SyncPlexDvrJob::dispatchIfConfigured(trigger: 'vod_bulk_disable');
                         Notification::make()

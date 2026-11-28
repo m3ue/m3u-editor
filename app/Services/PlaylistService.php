@@ -24,6 +24,7 @@ use App\Models\Series;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Closure;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
@@ -43,12 +44,14 @@ use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\LazyCollection;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
 use Throwable;
@@ -1163,6 +1166,58 @@ class PlaylistService
             ->toBase()
             ->pluck($keyName)
             ->all();
+    }
+
+    /**
+     * Apply a column update to every record in a Filament bulk-action selection,
+     * in batches of selected IDs so a "select all" over 100k+ rows never hydrates
+     * models. This is a query update, so model events do not fire; actions that
+     * rely on observers must update records individually instead.
+     *
+     * @param  array<string, mixed>  $values
+     * @param  (Closure(Builder): mixed)|null  $scope  Extra constraints applied to each batch.
+     * @return int The number of rows updated.
+     */
+    public static function updateSelectedRecords(Builder $recordsQuery, array $values, ?Closure $scope = null): int
+    {
+        $model = $recordsQuery->getModel();
+        $updated = 0;
+
+        foreach (array_chunk(self::selectedRecordIds($recordsQuery), 100) as $ids) {
+            $updated += $model->newQuery()
+                ->whereKey($ids)
+                ->when($scope, fn (Builder $query) => $scope($query))
+                ->update($values);
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Hydrate the records in a Filament bulk-action selection lazily, one batch
+     * of selected IDs at a time. For actions that must update records one by one
+     * so model events fire; plain column updates should use updateSelectedRecords().
+     *
+     * @param  (Closure(Builder): mixed)|null  $scope  Extra constraints applied to each batch.
+     * @return LazyCollection<int, Model>
+     */
+    public static function lazySelectedRecords(Builder $recordsQuery, ?Closure $scope = null, int $chunkSize = 100): LazyCollection
+    {
+        $model = $recordsQuery->getModel();
+        $ids = self::selectedRecordIds($recordsQuery);
+
+        return LazyCollection::make(function () use ($model, $ids, $scope, $chunkSize) {
+            foreach (array_chunk($ids, $chunkSize) as $chunk) {
+                $records = $model->newQuery()
+                    ->whereKey($chunk)
+                    ->when($scope, fn (Builder $query) => $scope($query))
+                    ->get();
+
+                foreach ($records as $record) {
+                    yield $record;
+                }
+            }
+        });
     }
 
     /**

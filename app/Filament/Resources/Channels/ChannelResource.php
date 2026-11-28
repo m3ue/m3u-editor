@@ -625,15 +625,14 @@ class ChannelResource extends Resource implements CopilotResource
                             ->searchable()
                             ->disabled(fn (Get $get) => $get('playlist') === null),
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        $filtered = $records->where('playlist_id', $data['playlist']);
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $group = Group::findOrFail($data['group']);
-                        foreach ($filtered as $record) {
-                            $record->update([
+                        PlaylistService::lazySelectedRecords($recordsQuery, fn (Builder $query) => $query->where('playlist_id', $data['playlist']))
+                            ->each(fn (Channel $channel) => $channel->update([
                                 'group' => $group->name,
                                 'group_id' => $group->id,
-                            ]);
-                        }
+                            ]));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -658,9 +657,11 @@ class ChannelResource extends Resource implements CopilotResource
                                 ->default(1)
                                 ->required(),
                         ])
-                        ->action(function (Collection $records, array $data): void {
+                        ->fetchSelectedRecords(false)
+                        ->action(function (Builder $recordsQuery, array $data): void {
                             $start = (int) $data['start'];
-                            SortFacade::bulkRecountChannels($records, $start);
+                            $channels = Channel::whereKey(PlaylistService::selectedRecordIds($recordsQuery))->get(['id', 'sort']);
+                            SortFacade::bulkRecountChannels($channels, $start);
                             SyncPlexDvrJob::dispatchIfConfigured(trigger: 'channel_recount');
                         })
                         ->after(function ($livewire) {
@@ -691,8 +692,9 @@ class ChannelResource extends Resource implements CopilotResource
                             ->searchable(),
 
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
+                        Channel::whereKey(PlaylistService::selectedRecordIds($recordsQuery))
                             ->update([
                                 'logo_type' => $data['logo_type'],
                             ]);
@@ -722,8 +724,9 @@ class ChannelResource extends Resource implements CopilotResource
                                 AssetPickerAction::browse('logo'),
                             ]),
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
+                        Channel::whereKey(PlaylistService::selectedRecordIds($recordsQuery))
                             ->update([
                                 'logo' => empty($data['logo']) ? null : $data['logo'],
                             ]);
@@ -742,14 +745,21 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Apply URL')),
                 BulkAction::make('refresh_logo_cache')
                     ->label(__('Refresh logo cache (selected)'))
-                    ->action(function (Collection $records): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
                         $urls = [];
 
-                        foreach ($records as $record) {
-                            $urls[] = $record->logo;
-                            $urls[] = $record->logo_internal;
-                            $urls[] = $record->epgChannel?->icon_custom;
-                            $urls[] = $record->epgChannel?->icon;
+                        foreach (array_chunk(PlaylistService::selectedRecordIds($recordsQuery), 500) as $ids) {
+                            $channels = Channel::whereKey($ids)
+                                ->with(['epgChannel' => fn ($query) => $query->select('id', 'icon', 'icon_custom')])
+                                ->get(['id', 'logo', 'logo_internal', 'epg_channel_id']);
+
+                            foreach ($channels as $record) {
+                                $urls[] = $record->logo;
+                                $urls[] = $record->logo_internal;
+                                $urls[] = $record->epgChannel?->icon_custom;
+                                $urls[] = $record->epgChannel?->icon;
+                            }
                         }
 
                         $cleared = LogoCacheService::clearByUrls($urls);
@@ -773,11 +783,12 @@ class ChannelResource extends Resource implements CopilotResource
                 BulkAction::make('map')
                     ->label(__('Map EPG to selected'))
                     ->schema(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new MapPlaylistChannelsToEpg(
                                 epg: (int) $data['epg_id'],
-                                channels: $records->pluck('id')->toArray(),
+                                channels: PlaylistService::selectedRecordIds($recordsQuery),
                                 force: $data['override'],
                                 settings: $data['settings'] ?? [],
                             ));
@@ -797,35 +808,41 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Map now')),
                 BulkAction::make('unmap')
                     ->label(__('Undo EPG Map'))
-                    ->action(function (Collection $records): void {
-                        // Clear the EPG mapping
-                        Channel::whereIn('id', $records->pluck('id'))
-                            ->update(['epg_channel_id' => null]);
-
-                        // Invalidate cached EPG XML for all playlists containing these channels
-                        // (regular, custom, and merged) so Xtream API clients receive updated
-                        // XMLTV data immediately instead of waiting for the cache TTL to expire
-                        $records->loadMissing(['playlist.mergedPlaylists', 'customPlaylists']);
-
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
                         $affectedPlaylists = collect();
-                        foreach ($records as $channel) {
-                            if ($channel->playlist) {
-                                $affectedPlaylists->push($channel->playlist);
-                                foreach ($channel->playlist->mergedPlaylists as $merged) {
-                                    $affectedPlaylists->push($merged);
+
+                        foreach (array_chunk(PlaylistService::selectedRecordIds($recordsQuery), 500) as $ids) {
+                            // Clear the EPG mapping
+                            Channel::whereKey($ids)->update(['epg_channel_id' => null]);
+
+                            // Invalidate cached EPG XML for all playlists containing these channels
+                            // (regular, custom, and merged) so Xtream API clients receive updated
+                            // XMLTV data immediately instead of waiting for the cache TTL to expire
+                            $channels = Channel::whereKey($ids)
+                                ->with(['playlist.mergedPlaylists', 'customPlaylists'])
+                                ->get(['id', 'playlist_id']);
+
+                            foreach ($channels as $channel) {
+                                if ($channel->playlist) {
+                                    $affectedPlaylists->push($channel->playlist);
+                                    foreach ($channel->playlist->mergedPlaylists as $merged) {
+                                        $affectedPlaylists->push($merged);
+                                    }
+                                }
+                                foreach ($channel->customPlaylists as $custom) {
+                                    $affectedPlaylists->push($custom);
                                 }
                             }
-                            foreach ($channel->customPlaylists as $custom) {
-                                $affectedPlaylists->push($custom);
-                            }
+
+                            $affectedPlaylists = $affectedPlaylists->unique(fn ($p) => $p->getTable().'-'.$p->id);
                         }
                         // clearPlaylistEpgCacheFile() returns false when there was nothing to
                         // clear; Collection::each() stops on the first false return, so the
                         // callback must not forward it or later playlists get silently skipped.
-                        $affectedPlaylists->unique(fn ($p) => $p->getTable().'-'.$p->id)
-                            ->each(function ($p) {
-                                EpgCacheService::clearPlaylistEpgCacheFile($p);
-                            });
+                        $affectedPlaylists->each(function ($p) {
+                            EpgCacheService::clearPlaylistEpgCacheFile($p);
+                        });
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -841,8 +858,9 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Reset now')),
                 BulkAction::make('enable-epg-mapping')
                     ->label(__('Enable EPG mapping'))
-                    ->action(function (Collection $records, array $data): void {
-                        $records->each(fn ($channel) => $channel->update([
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::lazySelectedRecords($recordsQuery)->each(fn (Channel $channel) => $channel->update([
                             'epg_map_enabled' => true,
                         ]));
                     })->after(function () {
@@ -862,8 +880,9 @@ class ChannelResource extends Resource implements CopilotResource
                 BulkAction::make('disable-epg-mapping')
                     ->label(__('Disable EPG mapping'))
                     ->color('warning')
-                    ->action(function (Collection $records, array $data): void {
-                        $records->each(fn ($channel) => $channel->update([
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::lazySelectedRecords($recordsQuery)->each(fn (Channel $channel) => $channel->update([
                             'epg_map_enabled' => false,
                         ]));
                     })->after(function () {
@@ -890,9 +909,9 @@ class ChannelResource extends Resource implements CopilotResource
                             ->required()
                             ->helperText(__('Assign an AED profile to generate smart dummy EPG from channel titles.')),
                     ])
-                    ->action(function (Collection $records, array $data): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            $ids = $chunk->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
+                        foreach (array_chunk(PlaylistService::selectedRecordIds($recordsQuery), 100) as $ids) {
                             Channel::whereIn('id', $ids)->update(['aed_profile_id' => $data['aed_profile_id']]);
                             // A query update skips the Channel::updated cache clear.
                             EpgCacheService::clearForChannelIds($ids);
@@ -913,9 +932,9 @@ class ChannelResource extends Resource implements CopilotResource
                 BulkAction::make('remove-aed-profile')
                     ->label(__('Remove AED Profile'))
                     ->color('warning')
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            $ids = $chunk->pluck('id')->all();
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        foreach (array_chunk(PlaylistService::selectedRecordIds($recordsQuery), 100) as $ids) {
                             Channel::whereIn('id', $ids)->update(['aed_profile_id' => null]);
                             // A query update skips the Channel::updated cache clear.
                             EpgCacheService::clearForChannelIds($ids);
@@ -944,11 +963,10 @@ class ChannelResource extends Resource implements CopilotResource
                             ->default(0)
                             ->required(),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $value = (int) $data['shift'];
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['shift' => $value]);
-                        }
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['shift' => $value]);
                     })->after(function (array $data) {
                         Notification::make()
                             ->success()
@@ -973,11 +991,10 @@ class ChannelResource extends Resource implements CopilotResource
                             ->default(0)
                             ->required(),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $value = (string) $data['tvg_shift'];
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['tvg_shift' => $value]);
-                        }
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['tvg_shift' => $value]);
                     })->after(function (array $data) {
                         Notification::make()
                             ->success()
@@ -999,12 +1016,10 @@ class ChannelResource extends Resource implements CopilotResource
                             ->helperText(__('Leave empty to clear the override and use the provider tvg-id again.'))
                             ->maxLength(255),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $value = trim((string) ($data['stream_id_custom'] ?? '')) ?: null;
-                        $updated = 0;
-                        foreach ($records->chunk(100) as $chunk) {
-                            $updated += Channel::whereIn('id', $chunk->pluck('id'))->update(['stream_id_custom' => $value]);
-                        }
+                        $updated = PlaylistService::updateSelectedRecords($recordsQuery, ['stream_id_custom' => $value]);
 
                         Notification::make()
                             ->success()
@@ -1095,7 +1110,8 @@ class ChannelResource extends Resource implements CopilotResource
                                 ->placeholder(__('Leave empty to remove')),
                         ];
                     })
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new ChannelFindAndReplace(
                                 user_id: auth()->id(), // The ID of the user who owns the content
@@ -1103,7 +1119,7 @@ class ChannelResource extends Resource implements CopilotResource
                                 column: $data['column'] ?? 'title',
                                 find_replace: $data['find_replace'] ?? null,
                                 replace_with: $data['replace_with'] ?? '',
-                                channels: $records
+                                channel_ids: PlaylistService::selectedRecordIds($recordsQuery),
                             ));
                     })->after(function () {
                         Notification::make()
@@ -1133,12 +1149,13 @@ class ChannelResource extends Resource implements CopilotResource
                             ->required()
                             ->columnSpan(1),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new ChannelFindAndReplaceReset(
                                 user_id: auth()->id(), // The ID of the user who owns the content
                                 column: $data['column'] ?? 'title',
-                                channels: $records
+                                channel_ids: PlaylistService::selectedRecordIds($recordsQuery),
                             ));
                     })->after(function () {
                         Notification::make()
@@ -1173,18 +1190,15 @@ class ChannelResource extends Resource implements CopilotResource
                             ->helperText(__('When off, only channels without a stream profile will be updated. When on, all selected channels will be overwritten (including clearing back to none).'))
                             ->default(false),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $profileId = ! empty($data['stream_profile_id']) ? (int) $data['stream_profile_id'] : null;
                         $overwrite = (bool) ($data['overwrite_existing'] ?? false);
-                        $updated = 0;
-
-                        foreach ($records->chunk(100) as $chunk) {
-                            $query = Channel::whereIn('id', $chunk->pluck('id'));
-                            if (! $overwrite) {
-                                $query->whereNull('stream_profile_id');
-                            }
-                            $updated += $query->update(['stream_profile_id' => $profileId]);
-                        }
+                        $updated = PlaylistService::updateSelectedRecords(
+                            $recordsQuery,
+                            ['stream_profile_id' => $profileId],
+                            $overwrite ? null : fn (Builder $query) => $query->whereNull('stream_profile_id'),
+                        );
 
                         Notification::make()
                             ->success()
@@ -1207,12 +1221,10 @@ class ChannelResource extends Resource implements CopilotResource
                             ->helperText(__('Leave empty to clear the override and use the provider type again.'))
                             ->maxLength(255),
                     ])
-                    ->action(function (Collection $records, array $data): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery, array $data): void {
                         $value = trim((string) ($data['tvg_type'] ?? '')) ?: null;
-                        $updated = 0;
-                        foreach ($records->chunk(100) as $chunk) {
-                            $updated += Channel::whereIn('id', $chunk->pluck('id'))->update(['tvg_type' => $value]);
-                        }
+                        $updated = PlaylistService::updateSelectedRecords($recordsQuery, ['tvg_type' => $value]);
 
                         Notification::make()
                             ->success()
@@ -1228,10 +1240,9 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Apply')),
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
-                    ->action(function (Collection $records, array $data): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->notAioManaged()->update(['can_merge' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['can_merge' => true], fn (Builder $query) => $query->notAioManaged());
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1249,8 +1260,9 @@ class ChannelResource extends Resource implements CopilotResource
                 BulkAction::make('disable-merge')
                     ->label(__('Disable Merge'))
                     ->color('warning')
-                    ->action(function (Collection $records, array $data): void {
-                        $records->each(fn ($channel) => $channel->update([
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::lazySelectedRecords($recordsQuery)->each(fn (Channel $channel) => $channel->update([
                             'can_merge' => false,
                         ]));
                     })->after(function () {
@@ -1369,10 +1381,9 @@ class ChannelResource extends Resource implements CopilotResource
             BulkModalActionGroup::section('Probing', [
                 BulkAction::make('enable-probing')
                     ->label(__('Enable Probing'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->notAioManaged()->update(['probe_enabled' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['probe_enabled' => true], fn (Builder $query) => $query->notAioManaged());
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1389,10 +1400,9 @@ class ChannelResource extends Resource implements CopilotResource
                 BulkAction::make('disable-probing')
                     ->label(__('Disable Probing'))
                     ->color('warning')
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => false]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['probe_enabled' => false]);
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1408,9 +1418,10 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Disable now')),
                 BulkAction::make('probe-streams')
                     ->label(__('Probe Streams'))
-                    ->action(function (Collection $records): void {
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
                         dispatch(new ProbeChannelStreams(
-                            channelIds: $records->pluck('id')->all(),
+                            channelIds: PlaylistService::selectedRecordIds($recordsQuery),
                         ));
                     })->after(function () {
                         Notification::make()
@@ -1431,10 +1442,9 @@ class ChannelResource extends Resource implements CopilotResource
             BulkModalActionGroup::section('Enable / Disable', [
                 BulkAction::make('enable')
                     ->label(__('Enable selected'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['enabled' => true]);
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1452,10 +1462,9 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Yes, enable now')),
                 BulkAction::make('disable')
                     ->label(__('Disable selected'))
-                    ->action(function (Collection $records): void {
-                        foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
-                        }
+                    ->fetchSelectedRecords(false)
+                    ->action(function (Builder $recordsQuery): void {
+                        PlaylistService::updateSelectedRecords($recordsQuery, ['enabled' => false]);
                     })->after(function () {
                         Notification::make()
                             ->success()

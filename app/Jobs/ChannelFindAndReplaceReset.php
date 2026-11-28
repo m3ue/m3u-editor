@@ -23,6 +23,7 @@ class ChannelFindAndReplaceReset implements ShouldQueue
         public ?Collection $channels = null,
         public ?bool $all_playlists = false,
         public ?int $playlist_id = null,
+        public ?array $channel_ids = null,
     ) {
         //
     }
@@ -50,7 +51,21 @@ class ChannelFindAndReplaceReset implements ShouldQueue
         $totalUpdated = 0;
 
         // Process channels in chunks for better performance
-        if (! $this->channels) {
+        if ($this->channel_ids !== null) {
+            // Selected IDs (e.g. from a bulk action): reset in ID chunks without
+            // hydrating the selection. Not scoped to user_id: the IDs come from
+            // the table's access-scoped selection, and admins may act on other
+            // users' channels.
+            foreach (array_chunk($this->channel_ids, 1000) as $channelIds) {
+                $totalUpdated += DB::table('channels')
+                    ->whereIn('id', $channelIds)
+                    ->whereNotNull($customColumn)
+                    ->update([
+                        $customColumn => null,
+                        'updated_at' => now(),
+                    ]);
+            }
+        } elseif (! $this->channels) {
             // Use chunking to process large datasets efficiently
             Channel::query()
                 ->where('user_id', $this->user_id)
