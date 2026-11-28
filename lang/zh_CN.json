@@ -5942,6 +5942,7 @@
     "The proxy answered HTTP :status when sending a test event.": "发送测试事件时代理返回 HTTP :status。",
     "The proxy couldn't deliver a test event to M3U Editor at :host. Check that the proxy can reach that address, and that both use the same API token.": "代理无法向位于 :host 的 M3U Editor 发送测试事件。请检查代理能否访问该地址，以及两者是否使用相同的 API 令牌。",
     "The proxy delivered a test event to M3U Editor.": "代理已向 M3U Editor 发送测试事件。",
+    "The proxy is not available to you, so Provider Profiles redirect players straight to the provider.": "你无法使用代理，因此提供商配置文件会将播放器直接重定向到提供商。",
     "The proxy never reported the end": "代理从未报告结束",
     "The proxy service is not reachable right now.": "当前无法连接到代理服务。",
     "The queue workers have been restarted and any pending jobs flushed.": "队列工作进程已重启，所有待处理任务已清空。",

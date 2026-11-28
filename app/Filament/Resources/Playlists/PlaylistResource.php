@@ -1208,7 +1208,9 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->compact()
                 ->collapsed(fn (?Playlist $record): bool => ! ($record?->profiles_enabled ?? false))
-                ->hidden(fn (?Playlist $record): bool => ! auth()->user()->canUseProxy() || ($record?->is_network_playlist ?? false))
+                // Without proxy access, profiles still work in Redirect mode (players go
+                // straight to the provider), so the section stays and Redirect is locked on.
+                ->hidden(fn (?Playlist $record): bool => $record?->is_network_playlist ?? false)
                 ->schema([
                     Grid::make()
                         ->columns(3)
@@ -1216,10 +1218,15 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->schema([
                             Toggle::make('profiles_enabled')
                                 ->label(__('Enable Provider Profiles'))
-                                ->helperText(__('NOTE: When enabled, proxy mode is required for accurate connection tracking, unless Redirect mode is used.'))
+                                ->helperText(fn (): string => auth()->user()->canUseProxy()
+                                    ? __('NOTE: When enabled, proxy mode is required for accurate connection tracking, unless Redirect mode is used.')
+                                    : __('The proxy is not available to you, so Provider Profiles redirect players straight to the provider.'))
                                 ->live()
                                 ->afterStateUpdated(function (Set $set, Get $get, $state) {
                                     if ($state) {
+                                        if (! auth()->user()->canUseProxy()) {
+                                            $set('profiles_redirect', true);
+                                        }
                                         $set('enable_proxy', ! $get('profiles_redirect'));
                                     }
                                 })
@@ -1275,8 +1282,14 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
                                 ->live()
                                 ->afterStateUpdated(fn (Set $set, $state) => $set('enable_proxy', ! $state))
+                                // Without proxy access Redirect is the only mode that pools accounts.
+                                // Disabled fields are not saved by default, and the forced value
+                                // also covers a tampered request.
+                                ->disabled(fn (): bool => ! auth()->user()->canUseProxy())
+                                ->dehydrated()
+                                ->dehydrateStateUsing(fn ($state): bool => ! auth()->user()->canUseProxy() || (bool) $state)
                                 ->inline(false)
-                                ->default(false),
+                                ->default(fn (): bool => ! auth()->user()->canUseProxy()),
                         ]),
 
                     Grid::make()

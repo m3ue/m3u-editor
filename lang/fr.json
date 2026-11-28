@@ -5942,6 +5942,7 @@
     "The proxy answered HTTP :status when sending a test event.": "Le proxy a répondu HTTP :status lors de l'envoi d'un événement de test.",
     "The proxy couldn't deliver a test event to M3U Editor at :host. Check that the proxy can reach that address, and that both use the same API token.": "Le proxy n'a pas pu transmettre d'événement de test à M3U Editor à :host. Vérifiez que le proxy peut joindre cette adresse et que les deux utilisent le même jeton API.",
     "The proxy delivered a test event to M3U Editor.": "Le proxy a transmis un événement de test à M3U Editor.",
+    "The proxy is not available to you, so Provider Profiles redirect players straight to the provider.": "Le proxy ne vous est pas disponible, les profils de fournisseur redirigent donc les lecteurs directement vers le fournisseur.",
     "The proxy never reported the end": "Le proxy n'a jamais signalé la fin",
     "The proxy service is not reachable right now.": "Le service proxy est actuellement injoignable.",
     "The queue workers have been restarted and any pending jobs flushed.": "Les workers ont été redémarrés et les jobs en attente ont été vidés.",

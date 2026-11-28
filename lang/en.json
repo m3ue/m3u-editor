@@ -6968,6 +6968,7 @@
     "The proxy answered HTTP :status when sending a test event.": "The proxy answered HTTP :status when sending a test event.",
     "The proxy couldn't deliver a test event to M3U Editor at :host. Check that the proxy can reach that address, and that both use the same API token.": "The proxy couldn't deliver a test event to M3U Editor at :host. Check that the proxy can reach that address, and that both use the same API token.",
     "The proxy delivered a test event to M3U Editor.": "The proxy delivered a test event to M3U Editor.",
+    "The proxy is not available to you, so Provider Profiles redirect players straight to the provider.": "The proxy is not available to you, so Provider Profiles redirect players straight to the provider.",
     "The proxy never reported the end": "The proxy never reported the end",
     "The proxy service is not reachable right now.": "The proxy service is not reachable right now.",
     "The queue workers have been restarted and any pending jobs flushed.": "The queue workers have been restarted and any pending jobs flushed.",

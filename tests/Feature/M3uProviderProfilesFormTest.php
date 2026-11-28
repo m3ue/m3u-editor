@@ -281,3 +281,47 @@ it('turns the stream proxy off when Redirect mode is enabled, without requiring 
         ->and($playlist->profiles_redirect_hold_seconds)->toBe(900)
         ->and($playlist->usesProfileRedirect())->toBeTrue();
 });
+
+it('shows Provider Profiles to users without proxy access, locked to Redirect mode', function () {
+    $user = User::factory()->create(['permissions' => []]);
+    $this->actingAs($user);
+
+    $playlist = Playlist::factory()->for($user)->create([
+        'xtream' => false,
+        'xtream_config' => null,
+        'enable_proxy' => false,
+        'profiles_enabled' => false,
+        'url' => 'http://provider.test:8080/get.php?username=puser&password=ppass&type=m3u_plus',
+    ]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldExists('profiles_enabled')
+        ->fillForm(['user_agent' => 'Test Agent', 'profiles_enabled' => true])
+        ->assertFormFieldIsDisabled('profiles_redirect')
+        ->assertFormSet(['profiles_redirect' => true, 'enable_proxy' => false])
+        // A tampered request cannot turn Redirect off without proxy access.
+        ->set('data.profiles_redirect', false)
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $playlist->refresh();
+
+    expect($playlist->profiles_enabled)->toBeTrue()
+        ->and($playlist->profiles_redirect)->toBeTrue()
+        ->and((bool) $playlist->enable_proxy)->toBeFalse()
+        ->and($playlist->usesProfileRedirect())->toBeTrue();
+});
+
+it('keeps Redirect mode optional for users with proxy access', function () {
+    $playlist = m3uProfilesFormPlaylist($this->user);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldIsEnabled('profiles_redirect')
+        ->assertFormSet(['profiles_redirect' => false])
+        ->fillForm(['user_agent' => 'Test Agent'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($playlist->refresh()->profiles_redirect)->toBeFalse()
+        ->and($playlist->poolsProfilesThroughProxy())->toBeTrue();
+});
