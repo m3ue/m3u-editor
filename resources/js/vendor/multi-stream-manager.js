@@ -112,7 +112,7 @@ function multiStreamManager() {
 
             const player = {
                 id: playerId,
-                channelId: channelData.id ?? null,
+                channelId: channelData.stream_id ?? channelData.id ?? null,
                 channelType: channelData.type || 'channel', // default to 'channel' if type not provided
                 title: channelData.title || channelData.name || 'Unknown Channel',
                 display_title: channelData.display_title || channelData.title || channelData.name || 'Unknown Channel',

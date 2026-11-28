@@ -6,9 +6,15 @@ use App\Models\Playlist;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Bus::fake();
+    Http::preventStrayRequests();
+});
 
 // This route also requires an authenticated panel session and ownership of the
 // requested channel/episode (see VerifyM3uProxyCallback's sibling security fix on
