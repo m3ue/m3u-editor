@@ -72,6 +72,9 @@ it('resolves the M3U tvg-type from the override, then the provider, then live/mo
     'xtream vod keeps movies' => [null, 'movie', true, 'movies'],
     'xtream series' => [null, 'series', false, 'tvshows'],
     'provider value' => [null, 'radio_streams', false, 'radio_streams'],
+    // Xtream-only live type, not an M3U tvg-type players recognize.
+    'xtream created_live' => [null, 'created_live', false, 'live'],
+    'created_live override' => ['Created_Live', null, false, 'live'],
     'override wins' => ['live', 'movies', true, 'live'],
 ]);
 

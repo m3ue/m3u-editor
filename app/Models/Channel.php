@@ -456,7 +456,8 @@ class Channel extends Model
      * The `tvg-type` to emit in M3U output: the user's `tvg_type` override, else the
      * provider's `stream_type`, else "live" (or "movies" for VOD). Xtream vocabulary from
      * the provider is translated to the M3U equivalents ("movie" -> "movies",
-     * "series" -> "tvshows") so Xtream-sourced VOD keeps reporting "movies".
+     * "series" -> "tvshows", "created_live" -> "live") so Xtream-sourced VOD keeps
+     * reporting "movies" and panel-created live channels keep reporting "live".
      */
     public function resolveM3uTvgType(): string
     {
@@ -464,6 +465,7 @@ class Channel extends Model
 
         return match ($type) {
             null => $this->is_vod ? 'movies' : 'live',
+            'created_live' => 'live',
             'movie' => 'movies',
             'series' => 'tvshows',
             default => $type,
