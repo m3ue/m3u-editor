@@ -878,7 +878,9 @@ class M3uProxyApiController extends Controller
         $id = $request->input('id');
         $type = $request->input('type');
 
-        if (! $id || ! $type) {
+        if ((! is_int($id) && ! is_string($id))
+            || filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+            || ! $type) {
             return response()->noContent(422);
         }
 

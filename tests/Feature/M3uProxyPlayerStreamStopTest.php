@@ -1,14 +1,19 @@
 <?php
 
 use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Bus::fake();
     // Prevent any real network call to the m3u-proxy service; let each test
     // assert whether a stop request was (or wasn't) actually sent.
     Http::fake();
@@ -77,5 +82,67 @@ it('returns unprocessable when type or id is missing', function () {
     $response = $this->actingAs($user)->postJson('/api/m3u-proxy/player-stream/stop', []);
 
     $response->assertStatus(422);
+    Http::assertNothingSent();
+});
+
+it('rejects malformed player stop ids before looking up a model', function (mixed $id, string $type) {
+    $user = User::factory()->create();
+    $modelQueries = [];
+
+    DB::listen(function (QueryExecuted $query) use (&$modelQueries) {
+        if (str_contains($query->sql, '"episodes"') || str_contains($query->sql, '"channels"')) {
+            $modelQueries[] = $query->sql;
+        }
+    });
+
+    $this->actingAs($user)->postJson('/api/m3u-proxy/player-stream/stop', [
+        'id' => $id,
+        'type' => $type,
+    ])->assertNoContent(422);
+
+    expect($modelQueries)->toBeEmpty();
+    Http::assertNothingSent();
+})->with([
+    'prefixed episode' => ['episode-1722', 'episode'],
+    'prefixed channel' => ['channel-1722', 'channel'],
+    'array' => [[1722], 'episode'],
+    'boolean' => [true, 'episode'],
+    'float' => [1722.5, 'episode'],
+    'negative' => [-1, 'episode'],
+    'zero' => [0, 'episode'],
+    'decimal string' => ['1722.5', 'episode'],
+    'overflow' => ['9223372036854775808', 'episode'],
+]);
+
+it('lets the authenticated owner stop their episode using a numeric string id', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $episode = Episode::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $user->id,
+    ]);
+
+    $this->actingAs($user)->postJson('/api/m3u-proxy/player-stream/stop', [
+        'id' => (string) $episode->id,
+        'type' => 'episode',
+    ])->assertNoContent();
+
+    Http::assertSentCount(1);
+});
+
+it('prevents an authenticated user from stopping another users episode stream', function () {
+    $owner = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $playlist = Playlist::factory()->for($owner)->create();
+    $episode = Episode::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $owner->id,
+    ]);
+
+    $this->actingAs($otherUser)->postJson('/api/m3u-proxy/player-stream/stop', [
+        'id' => $episode->id,
+        'type' => 'episode',
+    ])->assertNoContent();
+
     Http::assertNothingSent();
 });

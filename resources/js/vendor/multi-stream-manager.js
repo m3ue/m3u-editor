@@ -110,9 +110,14 @@ function multiStreamManager() {
 
             const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
 
+            // DVR recordings are served by the editor itself, not m3u-proxy, so they
+            // have no proxy stream to stop. Their stream_id is a recording ID, which
+            // the stop endpoint would otherwise look up as a channel ID.
+            const isDvrRecording = channelData.content_type === 'dvr_recording';
+
             const player = {
                 id: playerId,
-                channelId: channelData.id ?? null,
+                channelId: isDvrRecording ? null : (channelData.stream_id ?? channelData.id ?? null),
                 channelType: channelData.type || 'channel', // default to 'channel' if type not provided
                 title: channelData.title || channelData.name || 'Unknown Channel',
                 display_title: channelData.display_title || channelData.title || channelData.name || 'Unknown Channel',
@@ -324,7 +329,10 @@ function multiStreamManager() {
                 url: player.url ?? '',
                 format: player.format ?? 'ts',
                 content_type: player.content_type ?? '',
-                stream_id: player.stream_id ?? '',
+                // The pop-out only uses stream_id to stop the proxy stream (and for
+                // progress, which needs a content_type the pop-out does not accept for
+                // DVR recordings), so pass the same proxy-stop ID as the floating player.
+                stream_id: player.content_type === 'dvr_recording' ? '' : (player.stream_id ?? ''),
                 playlist_id: player.playlist_id ?? '',
                 series_id: player.series_id ?? '',
                 season_number: player.season_number ?? '',
