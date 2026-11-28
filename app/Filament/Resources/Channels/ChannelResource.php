@@ -240,7 +240,7 @@ class ChannelResource extends Resource implements CopilotResource
                 }),
             ToggleColumn::make('can_merge')
                 ->label(__('Merge Enabled'))
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             IconColumn::make('last_scrubber_live')
                 ->label(__('Scrubber'))
@@ -277,7 +277,7 @@ class ChannelResource extends Resource implements CopilotResource
 
                     return $query->orderByRaw("COALESCE(stream_id_custom, stream_id) {$direction}");
                 })
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextInputColumn::make('title_custom')
                 ->label(__('Title'))
                 ->rules(['min:0', 'max:255'])
@@ -288,7 +288,7 @@ class ChannelResource extends Resource implements CopilotResource
 
                     return $query->orderByRaw("COALESCE(title_custom, title) {$direction}");
                 })
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextInputColumn::make('name_custom')
                 ->label(__('Name'))
                 ->rules(['min:0', 'max:255'])
@@ -319,13 +319,13 @@ class ChannelResource extends Resource implements CopilotResource
                 ->type('url')
                 ->placeholder(fn ($record) => $record->url)
                 ->searchable()
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextInputColumn::make('shift')
                 ->label(__('Time Shift'))
                 ->rules(['numeric', 'min:0'])
                 ->type('number')
                 ->placeholder(__('Time Shift'))
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             TextColumn::make('group')
                 ->hidden(fn () => ! $showGroup)
@@ -351,7 +351,7 @@ class ChannelResource extends Resource implements CopilotResource
                 ->hidden($minimal),
             ToggleColumn::make('probe_enabled')
                 ->label(__('Probe Enabled'))
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             IconColumn::make('is_proxy_enabled')
                 ->label(__('Proxy'))
@@ -368,6 +368,7 @@ class ChannelResource extends Resource implements CopilotResource
             ProbeStatusColumn::make(),
             ToggleColumn::make('epg_map_enabled')
                 ->label(__('Mapping Enabled'))
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             TextColumn::make('epgChannel.name')
                 ->label(__('EPG Channel'))
@@ -403,7 +404,7 @@ class ChannelResource extends Resource implements CopilotResource
                 ->label(__('EPG Shift'))
                 ->rules(['numeric'])
                 ->placeholder(__('EPG Shift'))
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             SelectColumn::make('logo_type')
                 ->label(__('Preferred Icon'))
@@ -412,7 +413,7 @@ class ChannelResource extends Resource implements CopilotResource
                     'epg' => 'EPG',
                 ])
                 ->sortable()
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('lang')
                 ->searchable()
                 ->toggleable(isToggledHiddenByDefault: true)

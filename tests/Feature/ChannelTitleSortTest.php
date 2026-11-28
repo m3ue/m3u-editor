@@ -32,6 +32,7 @@ it('sorts channels by resolved title when custom and original titles are mixed',
 
     Livewire::test(ListChannels::class)
         ->loadTable()
+        ->toggleAllTableColumns()
         ->sortTable('title_custom')
         ->assertCanSeeTableRecords([$apple, $banana, $cherry, $date], inOrder: true);
 });

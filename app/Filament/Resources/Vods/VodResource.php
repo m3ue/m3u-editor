@@ -241,7 +241,7 @@ class VodResource extends Resource implements CopilotResource
                 ->label(__('Merge Enabled'))
                 ->disabled(fn (Channel $record): bool => (bool) $record->aio_integration_id)
                 ->tooltip(fn (Channel $record): ?string => $record->aio_integration_id ? __('AIOStreams-added VODs use their own internal failover mechanism and cannot be merged.') : null)
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             TextColumn::make('failovers_count')
                 ->label(__('Failovers'))
@@ -260,7 +260,7 @@ class VodResource extends Resource implements CopilotResource
                 ->label(__('Probe Enabled'))
                 ->disabled(fn (Channel $record): bool => (bool) $record->aio_integration_id)
                 ->tooltip(fn (Channel $record): ?string => $record->aio_integration_id ? __('AIOStreams-added VODs cannot be probed.') : null)
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             ProbeStatusColumn::make(),
             IconColumn::make('is_proxy_enabled')
@@ -311,7 +311,7 @@ class VodResource extends Resource implements CopilotResource
                         ->orderBy('stream_id_custom', $direction)
                         ->orderBy('stream_id', $direction);
                 })
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextInputColumn::make('title_custom')
                 ->label(__('Title'))
                 ->rules(['min:0', 'max:255'])
@@ -322,7 +322,7 @@ class VodResource extends Resource implements CopilotResource
                         ->orderBy('title_custom', $direction)
                         ->orderBy('title', $direction);
                 })
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextInputColumn::make('name_custom')
                 ->label(__('Name'))
                 ->rules(['min:0', 'max:255'])
@@ -349,13 +349,13 @@ class VodResource extends Resource implements CopilotResource
                 ->type('url')
                 ->placeholder(fn ($record) => $record->url)
                 ->searchable()
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextInputColumn::make('shift')
                 ->label(__('Time Shift'))
                 ->rules(['numeric', 'min:0'])
                 ->type('number')
                 ->placeholder(__('Time Shift'))
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             TextColumn::make('group')
                 ->hidden(fn () => ! $showGroup)
@@ -382,7 +382,7 @@ class VodResource extends Resource implements CopilotResource
                 ->label(__('EPG Shift'))
                 ->rules(['numeric'])
                 ->placeholder(__('EPG Shift'))
-                ->toggleable()
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             SelectColumn::make('logo_type')
                 ->label(__('Preferred Icon'))
@@ -391,7 +391,7 @@ class VodResource extends Resource implements CopilotResource
                     'epg' => 'EPG',
                 ])
                 ->sortable()
-                ->toggleable(),
+                ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('lang')
                 ->searchable()
                 ->toggleable(isToggledHiddenByDefault: true)

@@ -3,6 +3,7 @@
 use App\Filament\Resources\Channels\Pages\ListChannels;
 use App\Filament\Resources\Groups\Pages\EditGroup;
 use App\Filament\Resources\Groups\RelationManagers\ChannelsRelationManager;
+use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Models\Channel;
@@ -38,6 +39,29 @@ function largeSelectionMakeGroupChannels(Playlist $playlist, Group $group, array
         'sort' => $sort,
     ]), $sorts);
 }
+
+dataset('rarely used inline editable columns', [
+    'stream_id_custom', 'title_custom', 'url_custom', 'shift', 'tvg_shift',
+    'logo_type', 'can_merge', 'probe_enabled', 'epg_map_enabled',
+]);
+
+it('hides rarely used inline editable channel columns by default', function (string $column) {
+    $table = Livewire::test(ListChannels::class)->instance()->getTable();
+
+    expect($table->getColumn($column)->isToggledHiddenByDefault())->toBeTrue();
+})->with('rarely used inline editable columns');
+
+it('hides rarely used inline editable VOD columns by default', function (string $column) {
+    $table = Livewire::test(ListVod::class)->instance()->getTable();
+
+    expect($table->getColumn($column)->isToggledHiddenByDefault())->toBeTrue();
+})->with(['stream_id_custom', 'title_custom', 'url_custom', 'shift', 'tvg_shift', 'logo_type', 'can_merge', 'probe_enabled']);
+
+it('keeps the everyday channel columns visible by default', function (string $column) {
+    $table = Livewire::test(ListChannels::class)->instance()->getTable();
+
+    expect($table->getColumn($column)->isToggledHiddenByDefault())->toBeFalse();
+})->with(['sort', 'enabled', 'name_custom', 'channel']);
 
 it('keeps group channel tables paginated while reordering', function () {
     $component = Livewire::test(ChannelsRelationManager::class, [
