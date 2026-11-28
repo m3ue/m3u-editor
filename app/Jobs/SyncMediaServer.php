@@ -71,6 +71,11 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
     protected string $batchNo;
 
     /**
+     * Set once the integration or its playlist is found deleted mid-sync.
+     */
+    protected bool $syncTargetDeleted = false;
+
+    /**
      * The number of seconds after which the job's unique lock will be released.
      */
     public int $uniqueFor = 1800;
@@ -176,12 +181,22 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             // Sync movies (as VOD channels)
             if ($integration->import_movies) {
                 $this->syncMovies($integration, $playlist, $service);
+                if ($this->syncTargetDeleted) {
+                    $this->logSyncTargetDeleted($integration);
+
+                    return;
+                }
                 $integration->update(['progress' => 50]);
             }
 
             // Sync series and episodes
             if ($integration->import_series) {
                 $this->syncSeries($integration, $playlist, $service);
+                if ($this->syncTargetDeleted) {
+                    $this->logSyncTargetDeleted($integration);
+
+                    return;
+                }
             }
 
             // Remove stale records no longer present on the media server
@@ -238,6 +253,12 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             $this->dispatchMetadataLookup($integration, $playlist);
 
         } catch (\Throwable $e) {
+            if (isset($playlist) && $this->syncTargetWasDeleted($playlist)) {
+                $this->logSyncTargetDeleted($integration);
+
+                return;
+            }
+
             $this->stats['errors'][] = $e->getMessage();
 
             // Update integration with error
@@ -269,6 +290,29 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 'trace' => $e->getTraceAsString(),
             ]);
         }
+    }
+
+    /**
+     * Whether the integration or its playlist was deleted while this sync was
+     * running. Deleting an integration also deletes its playlist, so without
+     * this check every remaining item fails a foreign key insert.
+     */
+    protected function syncTargetWasDeleted(Playlist $playlist): bool
+    {
+        if (! $this->syncTargetDeleted) {
+            $this->syncTargetDeleted = ! Playlist::query()->whereKey($playlist->id)->exists()
+                || ! MediaServerIntegration::query()->whereKey($this->integrationId)->exists();
+        }
+
+        return $this->syncTargetDeleted;
+    }
+
+    protected function logSyncTargetDeleted(MediaServerIntegration $integration): void
+    {
+        Log::info('SyncMediaServer: Integration or playlist deleted during sync, stopping', [
+            'integration_id' => $integration->id,
+            'name' => $integration->name,
+        ]);
     }
 
     /**
@@ -318,6 +362,10 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         ]);
 
         foreach ($movies as $index => $movie) {
+            if ($this->syncTargetWasDeleted($playlist)) {
+                return;
+            }
+
             try {
                 $this->syncMovie($integration, $playlist, $service, $movie);
                 $this->stats['movies_synced']++;
@@ -670,6 +718,10 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         ]);
 
         foreach ($seriesList as $index => $seriesData) {
+            if ($this->syncTargetWasDeleted($playlist)) {
+                return;
+            }
+
             // Optimistic progress update BEFORE processing — syncOneSeries() involves
             // multiple slow WebDAV requests, so advance the bar at start, not end.
             $syncFraction = $totalSeries > 0 ? $index / $totalSeries : 0;
