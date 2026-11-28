@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\EmbyPublicationCatalogService;
 use Filament\Actions\Action as FilamentAction;
 use Filament\Actions\Testing\TestAction;
+use Filament\Forms\Components\Select;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
@@ -106,7 +107,7 @@ it('renders only the simple managed publishing controls in the create modal', fu
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table())
         ->assertMountedActionModalSee('What do you want to publish?')
-        ->assertMountedActionModalSee('Create a new library')
+        ->assertFormFieldExists('destination', fn (Select $field): bool => $field->getOptions() === ['__new__' => 'Create a new library'])
         ->assertMountedActionModalSee('Publish to Emby')
         ->assertMountedActionModalDontSee('Source type')
         ->assertMountedActionModalDontSee('Mapped group')
@@ -640,10 +641,11 @@ it('offers only source-compatible libraries with a companion-approved writable p
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table())
         ->set('mountedActions.0.data.publication_type', 'movies')
-        ->assertMountedActionModalSee('Compatible Movies')
-        ->assertMountedActionModalSee('Legacy Movies')
-        ->assertMountedActionModalDontSee('Unwritable Movies')
-        ->assertMountedActionModalDontSee('Compatible TV');
+        ->assertFormFieldExists('destination', fn (Select $field): bool => $field->getOptions() === [
+            '__new__' => 'Create a new library',
+            'compatible-movies' => 'Compatible Movies',
+            'legacy-movies' => 'Legacy Movies',
+        ]);
 });
 
 it('shows a safe endpoint error and persists nothing when managed setup is unavailable', function () {
@@ -1400,10 +1402,9 @@ it('does not offer an existing library without a companion-approved writable pat
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table())
         ->set('mountedActions.0.data.publication_type', 'movies')
-        ->assertMountedActionModalDontSee('Existing Movies')
+        ->assertFormFieldExists('destination', fn (Select $field): bool => $field->getOptions() === ['__new__' => 'Create a new library'])
         ->assertMountedActionModalDontSee('Compatible library path')
-        ->assertMountedActionModalDontSee('Register a writable root')
-        ->assertMountedActionModalSee('Create a new library');
+        ->assertMountedActionModalDontSee('Register a writable root');
 });
 
 it('keeps existing-library path selection server-side when libraries have one or several paths', function () {
@@ -1439,8 +1440,11 @@ it('keeps existing-library path selection server-side when libraries have one or
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table())
         ->set('mountedActions.0.data.publication_type', 'movies')
-        ->assertMountedActionModalSee('Single')
-        ->assertMountedActionModalSee('Multiple')
+        ->assertFormFieldExists('destination', fn (Select $field): bool => $field->getOptions() === [
+            '__new__' => 'Create a new library',
+            'single' => 'Single',
+            'multiple' => 'Multiple',
+        ])
         ->assertMountedActionModalDontSee('Compatible library path')
         ->assertMountedActionModalDontSee('/srv/emby/managed/movies-4k');
 });
