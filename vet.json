@@ -98,60 +98,60 @@
             "hash": "tree-v2:7621e009898aea85dfa2ad91d25a3441db9ef5bf90a1b55e9b8396b3a43830f9"
         },
         "eslam-reda-div/filament-copilot": {
-            "version": "v1.9.0",
-            "hash": "tree-v2:c86e559a0af63a16b24738d2dc1f19e10f71ae718b8e53cfec438ca3de62b3c6"
+            "version": "v1.10.1",
+            "hash": "tree-v2:4adfcf168f57f0a8f999feaf6b0758861acfb24b6bd292c5435dc7dbf0c4d74a"
         },
         "evenement/evenement": {
             "version": "v3.0.2",
             "hash": "tree-v2:5bf08ea1a28ca2559ae1b79a9e99cb3bfd5c33cf13a4b8ce7cc943461473e4e3"
         },
         "filament/actions": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:e3dafe92b431aba603795e7bc62353c5fc5c45f5ead70365aa7fc67cd4de7de9"
+            "version": "v5.12.0",
+            "hash": "tree-v2:c19c62399afdfda978d074228f4f68a46f50e94b578ff4a4b08e9482a63eb2ea"
         },
         "filament/filament": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:ba09a1f50e8316de9fdc808d77f964c027465b1aac85ba932f47bcf57fd14706"
+            "version": "v5.12.0",
+            "hash": "tree-v2:bd2e98abfb65b4c3dda2273d77f5fd3e7094663880e4839c3cf915ef7273a986"
         },
         "filament/forms": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:2ac10a267c423e02cab48713d9d92be631e6f90ccf1595fc6bfa9ae7b02011a6"
+            "version": "v5.12.0",
+            "hash": "tree-v2:ace17d3a681d87180a129efe28663f5c789a3cf90c619221694a8f422575fd70"
         },
         "filament/infolists": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:bf2a4dfb0dd7029bcd4eba3e7fd3781fbdd0b709c55d9b149ddbc83908457277"
+            "version": "v5.12.0",
+            "hash": "tree-v2:8da6bc0f607e221b8dc1b1451cbc8e728f6c561df71c58d8d8e27f45b212d880"
         },
         "filament/notifications": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:003fa0afc90d8a08fdb3c7316de2b09d34eaf599e3abe98201a918c936672cce"
+            "version": "v5.12.0",
+            "hash": "tree-v2:c5c4aa83a701c0b00be44562e6d99110767ea923c505aec66222e3677038711b"
         },
         "filament/query-builder": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:27b669269ec44a35071b620f8cfd738571025b5fdefb8d5a58028a89e0d965fd"
+            "version": "v5.12.0",
+            "hash": "tree-v2:112a03d92e06750701495e76ff428a457d3194e1f3886460a40f0090885675e6"
         },
         "filament/schemas": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:c3b99579f0e708364face47428351023349b832561ee1ad97fd69434f50bf5fa"
+            "version": "v5.12.0",
+            "hash": "tree-v2:e67e85d69d229d18e2713ac3fcbc0b2f54e1e298c100e996c98bc158e7e2ce4c"
         },
         "filament/spatie-laravel-settings-plugin": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:8a0756ccc491734a4b5780bf9a3b2fd3abcbffb610f52ccbff371c3aa7b97cb9"
+            "version": "v5.12.0",
+            "hash": "tree-v2:184a8cc09f23ff7f144231da3890997b171eb077140580d10287259a8766e6e6"
         },
         "filament/spatie-laravel-tags-plugin": {
             "version": "v5.11.4",
             "hash": "tree-v2:f6dc7e7c49686393da080292f8550c075dddd6b372cc5f34e40367f05c0ec813"
         },
         "filament/support": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:08c62a225310e645b009e0ec26922584eb029d708eea4e9969b624a088a675c1"
+            "version": "v5.12.0",
+            "hash": "tree-v2:986abb1dc1b4162e63dea2cf6095fba60251ac0adc91428ff7d2c4165047aed8"
         },
         "filament/tables": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:96dafa5416bab7b16c65a2cb0c8c2dffc93c76ca1652a18695397e3bd4a10192"
+            "version": "v5.12.0",
+            "hash": "tree-v2:3a99c5f7643cdadcc503ba353db328898ac979536548b584368a835e13c36a99"
         },
         "filament/widgets": {
-            "version": "v5.11.4",
-            "hash": "tree-v2:daddbaeda0570fd19cee26c5933aa9a1c186295dd6681a02d60deb9f3de1ac84"
+            "version": "v5.12.0",
+            "hash": "tree-v2:a8143ae53a9a1bf56f925fc67e4070291dc4e5bec5f1d0e489fbe19adb32a237"
         },
         "firebase/php-jwt": {
             "version": "v7.1.0",
@@ -194,8 +194,8 @@
             "hash": "tree-v2:754e90b237c5214f31171a3319b3b23a359ebc39156d3f3f316a4074ec2c9612"
         },
         "intervention/image": {
-            "version": "4.4.1",
-            "hash": "tree-v2:22881c2638ead713a92e24cf7aeda358cb6367a21b2e688a71b4b1b301894fde"
+            "version": "4.4.2",
+            "hash": "tree-v2:4d03734af79b7f52da88e07b1480fd96b1d348de0dd92adb838d880d66323227"
         },
         "kirschbaum-development/eloquent-power-joins": {
             "version": "4.3.6",
@@ -214,8 +214,8 @@
             "hash": "tree-v2:5a1c3012ffc561e8be2efbcd8ae9340cc1f33a6463f3bed657ded82d965e12ea"
         },
         "laravel/framework": {
-            "version": "v13.43.0",
-            "hash": "tree-v2:3d8c081207c628cfc345785b40ea0af302de612c3534bc43741d7d52b9fbfa27"
+            "version": "v13.44.1",
+            "hash": "tree-v2:fd51260945fdeff7033d9b29a2bc5b3736569f0408c9b5e4cac474658673079d"
         },
         "laravel/horizon": {
             "version": "v5.52.0",
@@ -294,8 +294,8 @@
             "hash": "tree-v2:2394482030715cb4f35a47671ea84a2b0a9bf196b7cbd76e62d5dfa5a47a1e34"
         },
         "livewire/livewire": {
-            "version": "v4.4.8",
-            "hash": "tree-v2:ba227b9c0fa25ee3d5ea715216a41bf70d845016dbf25a3cb2cde91e7e4b3014"
+            "version": "v4.4.10",
+            "hash": "tree-v2:9b7238a3f9a46f05f0492c11f15b889d82069864ff8c5dce98b966fc752d30bb"
         },
         "monolog/monolog": {
             "version": "3.10.0",
@@ -370,8 +370,8 @@
             "hash": "tree-v2:7ce444855f6785c785d74adb3ea9199aa04a16c728af509af9aff2400a77ba1c"
         },
         "predis/predis": {
-            "version": "v3.7.1",
-            "hash": "tree-v2:5f0d0ddaa5d187be545515827f7808ae5db019db2c9cc491c29eb0b4a7a858c2"
+            "version": "v3.8.0",
+            "hash": "tree-v2:9ed9dcf8b5b7fe52f57165e179cdce73ba4080e92c1a94645db92a2785652ccb"
         },
         "psr/cache": {
             "version": "3.0.0",
@@ -471,7 +471,7 @@
         },
         "shuvroroy/filament-spatie-laravel-backup": {
             "version": "dev-main",
-            "hash": "tree-v2:99aee6d401226226a11f7e10685572c0aed2cffe55f44f83fe47887c08a3a05a"
+            "hash": "tree-v2:e53d527362c6ef16d9e964629127c34896ca4c9b527c4f01111cb7ba7bbd92f0"
         },
         "socialiteproviders/manager": {
             "version": "4.10.0",
@@ -534,8 +534,8 @@
             "hash": "tree-v2:43192d672f7cb3099748b2a256e209856e0b298035b4a47415ea0d8cf92c26ee"
         },
         "stechstudio/filament-impersonate": {
-            "version": "v5.7.0",
-            "hash": "tree-v2:d4a1b3119b756c9256f6ef42417ae58065871afa72814460e242400c42085d84"
+            "version": "v5.7.1",
+            "hash": "tree-v2:d02e6d8260a9a9b073f8b640c898e2ef3608b36145f7f2f4cdc68508b998ac73"
         },
         "stichoza/google-translate-php": {
             "version": "v5.3.5",
